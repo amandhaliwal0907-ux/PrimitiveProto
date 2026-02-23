@@ -57,7 +57,7 @@ def generate_primitives_from_block(text_block, context_text=None):
         model="gpt-5.2-2025-12-11",
         messages=messages,
         temperature=0.2,
-        max_tokens=2048
+        max_completion_tokens=2048
     )
     import json
     try:
