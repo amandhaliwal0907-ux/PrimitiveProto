@@ -54,7 +54,7 @@ def generate_primitives_from_block(text_block, context_text=None):
     if context_text:
         messages.append({"role": "user", "content": f"Context: {context_text}"})
     response = client.chat.completions.create(
-        model="gpt-5.2-turbo",
+        model="gpt-5.2-2025-12-11",
         messages=messages,
         temperature=0.2,
         max_tokens=2048
