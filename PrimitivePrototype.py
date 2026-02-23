@@ -16,7 +16,7 @@ def main():
     if not files:
         print("No PDF or DOCX files found in the script directory.")
         return
-    elif len(file2s) == 1:
+    elif len(files) == 1:
         file_path = os.path.join(script_dir, files[0])
         print(f"Auto-selected file: {files[0]}")
     else:
