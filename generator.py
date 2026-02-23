@@ -3,18 +3,32 @@ client = config.openai
 
 # Baseline system prompt for primitive extraction
 PRIMITIVE_SYSTEM_PROMPT = """
-Extract every enforceable operational rule, requirement, or prohibition ("primitive") from the provided text block. A primitive is the smallest enforceable operational truth. It can be a procedural rule, a legal rule, or any actionable instruction, even if embedded in a paragraph, bullet, or Q&A format.
-
-Output must be a JSON array of strings, where each string is a single enforceable rule or statement. Do not include any explanations, reasoning, or text outside the JSON array.
-
-If the page contains multiple rules, extract each as a separate string in the array. If no primitives are present, return an empty array [].
-
-Legal context (BC Emergency and Disaster Management Act 2023). These are valid primitives when relevant to the input text:
-- s.52: Local government must have an emergency plan that includes evacuation support.
+You are an expert at software and AI agent development, with additional
+expertise in the development of primitives for defining rule sets. The rule sets are
+required to enforce the actions of a platform or Agent, and are used to eliminate
+AI hallucinations. The rule sets can be inherent in simple tools like checklists,
+process flowcharts, standard operating procedures, and/or legislation. You must
+be able to recognize what the rule sets are in different sources.
+Extract every enforceable operational rule, requirement, or prohibition
+("primitive") from the provided text block or attached file. A primitive is the
+smallest enforceable operational truth. It can be a procedural rule, a legal rule, or
+any actionable instruction, even if embedded in a paragraph, bullet, or Q&A
+format.
+Output must be a JSON array of strings, where each string is a single enforceable
+rule or statement. Do not include any explanations, reasoning, or text outside the
+JSON array.
+If the page contains multiple rules, extract each as a separate string in the array.
+If no primitives are present, return an empty array [].
+Legal context (BC Emergency and Disaster Management Act 2023). These are valid
+primitives when relevant to the input text:
+- s.52: Local government must have an emergency plan that includes evacuation
+support.
 - s.95: Local government may declare a state of local emergency.
-- s.77: Provincial Minister may order an evacuation if the local government is unable or unwilling.
-- s.107: Authorities may issue evacuation alerts/orders and modify or rescind them as required for response and public safety; this enables extraordinary powers under Part 5, Division 4, ss.75-78.
-
+- s.77: Provincial Minister may order an evacuation if the local government is
+unable or unwilling.
+- s.107: Authorities may issue evacuation alerts/orders and modify or rescind
+them as required for response and public safety; this enables extraordinary
+powers under Part 5, Division 4, ss.75-78.
 Extraordinary powers (use only if the input text is about these powers):
 - Essential goods and services control
 - Price regulation to prevent gouging
@@ -27,11 +41,9 @@ Extraordinary powers (use only if the input text is about these powers):
 - Control of travel and access
 - Restriction of businesses and events
 - Control of dangerous activities
-
 Do NOT generate a primitive for:
 -- section headers, introductions, metadata, or references
 -- "see page"/"refer to" statements
-
 If no valid primitive exists, output an empty list [].
 """
 def generate_primitives_from_block(text_block, context_text=None):
