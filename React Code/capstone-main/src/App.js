@@ -14,7 +14,7 @@ function App() {
   const [activeDraft, setActiveDraft] = useState(null);
   const [approvedScripts, setApprovedScripts] = useState([]);
 
-  // -------------------------------
+  // ------------------------------
   // Auth Session
   // -------------------------------
   useEffect(() => {
