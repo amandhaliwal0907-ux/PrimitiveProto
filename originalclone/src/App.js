@@ -138,7 +138,7 @@ function App() {
       const data = await response.json();
       if (!data.script) return alert("Script generation failed (no script returned)");
 
-      const primitiveDraftToSave = data.primitiveDraft || {};
+      const primitiveDraftToSave = data.primitive || {};
 
       const { data: newDraftArray, error: draftError } = await supabase
         .from("draft_scripts")
@@ -312,57 +312,6 @@ function ApprovedScriptCard({ script, user }) {
 }
 
 
-function VoiceInputCard({ voiceTranscript, setVoiceTranscript }) {
-  const [recording, setRecording] = useState(false);
-
-  const startRecording = async () => {
-    setRecording(true);
-    
-    console.log("Recording started...");
-  };
-
-  const stopRecording = async () => {
-    setRecording(false);
-
-    console.log("Recording stopped and transcribing...");
-  };
-
-  return (
-    <div className="voice-input-card card">
-      <h3>Want to switch to Voice? Hit the button below to start recording!</h3>
-      <button
-        className="primary-btn"
-        onClick={recording ? stopRecording : startRecording}
-      >
-        {recording ? "Stop Recording" : "Start Recording"}
-      </button>
-
-      {voiceTranscript && (
-        <>
-          <textarea
-            value={voiceTranscript}
-            onChange={(e) => setVoiceTranscript(e.target.value)}
-            rows={4}
-            placeholder="Edit your transcription here..."
-          />
-          <button
-            className="primary-btn"
-            onClick={() => {
-            
-              setActiveDraft(prev =>
-                prev ? { ...prev, chatInputText: voiceTranscript, chatStarted: true } : prev
-              );
-              setVoiceTranscript(""); 
-            }}
-          >
-            Send to Chat
-          </button>
-        </>
-      )}
-    </div>
-  );
-}
-
 
   // Rendering
 
@@ -462,13 +411,7 @@ function VoiceInputCard({ voiceTranscript, setVoiceTranscript }) {
               )}
             </div>
           )}
-  {/* Voice Input Card */}
-  {activeDraft && (
-    <VoiceInputCard
-      voiceTranscript={voiceTranscript}
-      setVoiceTranscript={setVoiceTranscript}
-    />
-  )}
+
          {/* Approved Scripts */}
 {/* Button to open approved scripts modal */}
 <button
