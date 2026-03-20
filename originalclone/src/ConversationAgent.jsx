@@ -107,7 +107,7 @@ useEffect(() => {
       } else {
         appendMessage(
           "assistant",
-          `${data?.aiMessage || "Invalid request. Please only give edit, add, remove instructions."}\n\nDo you want to make further changes or approve?`
+          `${data?.aiMessage || "Invalid request. Please give instructions only about addition, removal or modification."}\n\nDo you want to make further changes or approve?`
         );
       }
     } catch {
