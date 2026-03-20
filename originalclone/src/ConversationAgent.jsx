@@ -19,12 +19,15 @@ export default function ConversationAgent({ draft, refresh }) {
   const [input, setInput] = useState("");
   const [regeneratedScript, setRegeneratedScript] = useState("");
   const [showRegenerateButton, setShowRegenerateButton] = useState(false);
-  const [guidedStep, setGuidedStep] = useState(0);
+
   const chatEndRef = useRef(null);
-  const [reviewResult, setReviewResult] = useState(null);
-const [reviewLoading, setReviewLoading] = useState(false);
+  
 const [completionMessageShown, setCompletionMessageShown] = useState(false);
 const [approving, setApproving] = useState(false);
+const [simResult, setSimResult] = useState(null);
+const [simLoading, setSimLoading] = useState(false);
+const [listening, setListening] = useState(false); // microphone active
+
 
   // Sync primitive when draft changes 
   useEffect(() => {
@@ -34,6 +37,8 @@ const [approving, setApproving] = useState(false);
   const missingFields = () =>
     PRIMITIVE_FIELDS.filter((f) => primitive?.[f] === undefined);
 
+
+
   const scrollToBottom = () => chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   const appendMessage = (role, content) => {
     setMessages((prev) => [...prev, { role, content }]);
@@ -41,30 +46,14 @@ const [approving, setApproving] = useState(false);
   };
 
 useEffect(() => {
-  const fields = missingFields();
-
- 
-  if (fields.length > 0 && guidedStep < fields.length) {
-    const field = fields[guidedStep];
-    const suggestion = draft?.enhanced_primitive?.[field] || "";
-
-    appendMessage(
-      "assistant",
-      `Field "${field}" is missing. Suggested: "${suggestion}"`
-    );
-  }
-
-  if (
-    fields.length === 0 &&
-    !completionMessageShown
-  ) {
+  if (!completionMessageShown) {
     appendMessage(
       "assistant",
       `All required fields are complete.\n\nDo you want to make any further changes or approve?`
     );
-    setCompletionMessageShown(true); 
+    setCompletionMessageShown(true);
   }
-}, [guidedStep, primitive, completionMessageShown]);
+}, [primitive, completionMessageShown]);
 
   // Accept / Skip 
   const savePrimitiveDraft = async (updated) => {
@@ -75,28 +64,8 @@ useEffect(() => {
       .eq("id", draft.id);
   };
 
-  const handleAcceptAI = async () => {
-    const fields = missingFields();
-    if (!fields.length) return;
-    const field = fields[guidedStep];
-    const value = draft?.enhanced_primitive?.[field];
-    if (value) {
-      const updated = { ...primitive, [field]: value };
-      await savePrimitiveDraft(updated);
-      appendMessage("assistant", `Accepted AI suggestion for "${field}".`);
-      setGuidedStep((prev) => prev + 1);
-    }
-  };
+ 
 
-  const handleSkip = async () => {
-    const fields = missingFields();
-    if (!fields.length) return;
-    const field = fields[guidedStep];
-    const updated = { ...primitive, [field]: "" };
-    await savePrimitiveDraft(updated);
-    appendMessage("assistant", `Skipped field "${field}".`);
-    setGuidedStep((prev) => prev + 1);
-  };
 
   //  Free Text Input 
   const handleUserInput = async (text) => {
@@ -138,7 +107,7 @@ useEffect(() => {
       } else {
         appendMessage(
           "assistant",
-          `${data?.aiMessage || "AI did not respond."}\n\nDo you want to make further changes or approve?`
+          `${data?.aiMessage || "Invalid request. Please only give edit, add, remove instructions."}\n\nDo you want to make further changes or approve?`
         );
       }
     } catch {
@@ -268,58 +237,31 @@ useEffect(() => {
     }
   };
 
-  const handleRunReview = async () => {
-  if (!regeneratedScript) return;
-
-  setReviewLoading(true);
-  setReviewResult(null);
-
+const handleRunStressTest = async () => {
+  setSimLoading(true);
   try {
-    const { data: primData } = await supabase
-      .from("primitives")
-      .select("primitive_json")
-      .eq("script_id", draft.primitive_id)
-      .maybeSingle();
-
-    if (!primData?.primitive_json) {
-      appendMessage("assistant", "Primitive data not found.");
-      return;
-    }
-
+    
     const res = await fetch(
-      "https://javlnpnawmfpypapauyc.supabase.co/functions/v1/hyper-service",
+      "https://javlnpnawmfpypapauyc.supabase.co/functions/v1/stress-test",
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          primitive: primData.primitive_json,
-          script: regeneratedScript,
-        }),
+        body: JSON.stringify({ primitive }),
       }
     );
-
-   if (!res.ok) {
-  const errorText = await res.text();
-  console.error("Hyper-service error:", errorText);
-
-  appendMessage(
-    "assistant",
-    `Script review failed.\n\nServer response:\n${errorText}`
-  );
-
-  return;
-}
-
     const data = await res.json();
-    setReviewResult(data);
-
+    setSimResult(data);
+    
+  
+    appendMessage("assistant", `Monte Carlo Simulation complete. The rule's risk score is ${data.riskScore}%. It is categorized as ${data.status}.`);
   } catch (err) {
-    appendMessage("assistant", "Review failed.");
+    appendMessage("assistant", "Simulation failed. Please check network.");
   } finally {
-    setReviewLoading(false);
+    setSimLoading(false);
   }
 };
 
+  
   //  Approve Regenerated Script
  const handleApproveRegeneratedScript = async () => {
   if (!regeneratedScript) return;
@@ -344,7 +286,42 @@ refresh(draft.id);
   
 };
 
-  // Render 
+const getInsight = (riskScore) => {
+  if (riskScore < 15) return "Low risk - safe to proceed.";
+  if (riskScore < 30) return "Moderate risk - consider improvements.";
+  return "High risk - needs revision.";
+};
+
+const startRecording = () => {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+  if (!SpeechRecognition) {
+    alert("Speech recognition not supported in this browser.");
+    return;
+  }
+
+  const recognition = new SpeechRecognition();
+  recognition.lang = "en-US";
+  recognition.interimResults = false;
+  recognition.maxAlternatives = 1;
+
+  recognition.onstart = () => {
+    setListening(true);
+  };
+
+  recognition.onresult = (event) => {
+    const transcript = event.results[0][0].transcript;
+    setInput(transcript); // Fill the chat input textarea
+  };
+
+  recognition.onend = () => {
+    setListening(false);
+  };
+
+  recognition.start();
+};
+
+// Render 
   return (
     <div className="conversation-panel">
       <div className="messages-panel">
@@ -356,15 +333,63 @@ refresh(draft.id);
         <div ref={chatEndRef} />
       </div>
 
-      <div className="guided-buttons">
-        {missingFields().length > 0 && (
-          <>
-            <button className="primary-btn" onClick={handleAcceptAI}>Accept AI</button>
-            <button className="secondary-btn" onClick={handleSkip}>Skip</button>
-          </>
-        )}
-        <button className="primary-btn" onClick={handleApprove} disabled={approving}>{approving ? "Approved" : "Approve"}</button>
+    
+       
+       {/* --- START OF CORRECTED SECTION --- */}
+<div className="safety-gate-section">
+  
+  {/* Monte Carlo Output */}
+  {simResult && (
+    <div className={`sim-card ${simResult.status.toLowerCase().replace(" ", "-")}`}>
+      <div className="risk-header">
+        <strong className="risk-title">Monte Carlo Reliability Test</strong>
+        <span className="risk-badge">{simResult.status}</span>
       </div>
+
+      <div className="risk-score">
+        {simResult.riskScore}% Probability of Failure
+      </div>
+
+      <p className="risk-insight">
+        <strong>Insight:</strong> {getInsight(simResult.riskScore)}
+      </p>
+
+      <p className="risk-recommendation">
+        <strong>Recommendation:</strong> {simResult.recommendation}
+      </p>
+    </div>
+  )}
+
+  <div className="action-buttons">
+    {/* Step 1: Run Simulation */}
+    <button 
+      className="primary-btn" 
+      onClick={handleRunStressTest} 
+      disabled={simLoading}
+    >
+      {simLoading ? "Running 1,000 Iterations..." : "Run Reliability Simulation"}
+    </button>
+
+    {/* Step 2: Approve */}
+    <button 
+      className="primary-btn approve-btn"
+      onClick={handleApprove} 
+      disabled={approving || simLoading}
+    >
+      {approving ? "Approved" : "Approve"}
+    </button>
+  </div>
+</div>
+ 
+
+
+<button 
+  className="primary-btn"
+  onClick={startRecording}
+  style={{ backgroundColor: listening ? "red" : "#eee", marginBottom: "8px" }}
+>
+  {listening ? "Listening..." : " Start Recording"}
+</button>
 
       <textarea
         rows={3}
@@ -382,55 +407,22 @@ refresh(draft.id);
         </button>
       )}
 
-    {regeneratedScript && (
-  <div className="regenerated-script">
-    <h4>Regenerated Script Preview</h4>
+      {regeneratedScript && (
+        <div className="regenerated-script">
+          <h4>Regenerated Script Preview</h4>
 
-    <textarea
-      rows={8}
-      value={regeneratedScript}
-      onChange={(e) => setRegeneratedScript(e.target.value)}
-    />
+          <textarea
+            rows={8}
+            value={regeneratedScript}
+            onChange={(e) => setRegeneratedScript(e.target.value)}
+          />
 
-    {!reviewResult && (
-      <button
-        className="secondary-btn"
-        onClick={handleRunReview}
-        disabled={reviewLoading}
-      >
-        {reviewLoading ? "Running Review..." : "Run Clarification Check"}
-      </button>
-    )}
-{reviewResult && (
-  <div className="review-results">
-    <h4>Clarification Check</h4>
 
-    {Object.values(reviewResult).every(items => !items || items.length === 0) ? (
-      <p>No clarification issues found.</p>
-    ) : (
-      Object.entries(reviewResult).map(([category, items]) => {
-        const safeItems = Array.isArray(items) ? items : [];
-        if (safeItems.length === 0) return null; 
-        return (
-          <div key={category}>
-            <strong>{category.replace(/_/g, " ").toUpperCase()}</strong>
-            <ul>
-              {safeItems.map((item, i) => (
-                <li key={i}>{item}</li>
-              ))}
-            </ul>
-          </div>
-        );
-      })
-    )}
-  </div>
-)}
-
-    <button onClick={handleApproveRegeneratedScript}>
-      Approve Regenerated Script
-    </button>
-  </div>
-)}
+          <button onClick={handleApproveRegeneratedScript}>
+            Approve Regenerated Script
+          </button>
+        </div>
+      )}
     </div>
   );
 }
