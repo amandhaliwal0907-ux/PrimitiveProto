@@ -86,15 +86,15 @@ body {
 }
 
 .card pre {
-  white-space: pre-wrap;       /* wrap long lines naturally */
-  overflow-x: hidden;          /* no horizontal scroll */
-  max-width: 100%;             /* stay inside parent */
-  background-color: #f9f9f9;   /* card-style */
+  white-space: pre-wrap;       
+  overflow-x: hidden;         
+  max-width: 100%;             
+  background-color: #f9f9f9;   
   padding: 12px 16px;          
   border-radius: 8px;
   font-size: 11px;
-  line-height: 1.6;            /* more readable spacing */
-  word-wrap: normal;           /* don’t break words */
+  line-height: 1.6;            
+  word-wrap: normal;           
 }
 .upload-section {
   position: sticky;
@@ -249,13 +249,7 @@ input[type="file"]:hover {
   background: #E0E4EA;
 }
 
-/* -------------------- Guided Buttons -------------------- */
-.guided-buttons {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-bottom: 12px;
-}
+
 
 /* Regenerated Script Panel */
 .regenerated-script {
@@ -277,7 +271,7 @@ input[type="file"]:hover {
   background: #FFFFFF;
 }
 
-/* -------------------- Responsive -------------------- */
+
 @media (max-width: 768px) {
   .dashboard {
     flex-direction: column;
@@ -388,14 +382,14 @@ input[type="file"]:hover {
   color: #040303;
 }
 
-/* Center Auth page */
+
 .auth-container {
   display: flex;
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  min-height: 100vh;               /* full viewport height */
-  background: #F0F2F5;             /* same background as dashboard */
+  min-height: 100vh;             
+  background: #F0F2F5;             
   gap: 16px;
 }
 
@@ -426,7 +420,7 @@ input[type="file"]:hover {
   box-shadow: 0 0 0 3px rgba(108,99,255,0.2);
 }
 
-/* Style login button like dashboard */
+
 .auth-container .primary-btn {
   width: 100%;
   max-width: 320px;
@@ -446,7 +440,7 @@ input[type="file"]:hover {
   transform: translateY(-2px);
 }
 
-/* Optional: Card-like wrapper */
+
 .auth-card {
   background: #FFF;
   padding: 32px 28px;
@@ -458,12 +452,12 @@ input[type="file"]:hover {
   align-items: center;
 }
 
-/* App.css or your component CSS */
+
 button:disabled,
 button[disabled] {
-  opacity: 0.5;        /* visually faded */
-  cursor: not-allowed; /* shows the disabled cursor */
-  pointer-events: none; /* ensures no interaction */
+  opacity: 0.5;        
+  cursor: not-allowed; 
+  pointer-events: none; 
 }
 
 
@@ -481,10 +475,7 @@ button[disabled] {
   z-index: 1000;
 }
 
-/* Modal content box */
 
-
-/* Close button */
 .close-btn {
   font-size: 14px;
   background: linear-gradient(135deg, #6C63FF, #8E8EE5);
@@ -510,19 +501,19 @@ button[disabled] {
  
 }
 
-/* Modal content box */
+
 .modal-content {
   background: #fff;
   max-height: 80%;
   width: 80%;
   display: flex;
-  flex-direction: column;   /* header + body */
+  flex-direction: column;   
   border-radius: 8px;
-  overflow: hidden;         /* prevent header from scrolling */
-  padding: 0;               /* body padding handled separately */
+  overflow: hidden;         
+  padding: 0;               
 }
 
-/* Modal header stays fixed inside modal */
+
 .modal-header {
   display: flex;
   justify-content: space-between;
@@ -530,14 +521,14 @@ button[disabled] {
   background: #f5f5f5;
   padding: 12px 20px;
   border-bottom: 1px solid #ddd;
-  flex-shrink: 0;           /* keeps it fixed at top */
+  flex-shrink: 0;          
 }
 
-/* Scrollable modal body */
+
 .modal-body {
   overflow-y: auto;
-  padding: 20px;            /* space inside body */
-  flex: 1;                  /* takes remaining modal height */
+  padding: 20px;           
+  flex: 1;                  
 }
 
 button.view-btn {
@@ -549,7 +540,7 @@ button.view-btn {
   font-size: 22px;
   border: none;
   cursor: pointer;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.2); /* softer shadow for grey */
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2); 
   transition: all 0.3s ease;
 }
 
@@ -557,4 +548,97 @@ button.view-btn:hover {
   background: linear-gradient(135deg, #7ED9CD, #3DAE9A); 
   transform: translateY(-2px);
   box-shadow: 0 6px 14px rgba(0,0,0,0.25);
+}
+
+/* Stress Test Result Card */
+.sim-card {
+  padding: 15px;
+  border-radius: 10px;
+  margin-bottom: 20px;
+  border-left: 6px solid #ccc;
+  transition: all 0.4s ease;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+}
+
+.sim-card.robust {
+  background-color: #f0fff4;
+  border-color: #38a169;
+  color: #22543d;
+}
+
+.sim-card.moderate {
+  background-color: #fffaf0;
+  border-color: #d69e2e;
+  color: #744210;
+}
+
+.sim-card.high-risk {
+  background-color: #fff5f5;
+  border-color: #e53e3e;
+  color: #742a2a;
+  animation: pulse-red 2s infinite;
+}
+
+@keyframes pulse-red {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.01); box-shadow: 0 0 15px rgba(229, 62, 62, 0.2); }
+  100% { transform: scale(1); }
+}
+
+.risk-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.risk-badge {
+  font-size: 0.75rem;
+  font-weight: bold;
+  padding: 4px 10px;
+  border-radius: 20px;
+  background: rgba(0,0,0,0.05);
+  text-transform: uppercase;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 12px;
+}
+
+.action-buttons button {
+  flex: 1;
+  height: 48px;
+}
+
+
+
+
+
+.safety-gate-section {
+  margin-top: 30px;
+  border-top: 2px solid #eee;
+  padding-top: 20px;
+}
+
+
+.risk-title {
+  font-size: 1.1em;
+}
+
+
+.risk-score {
+  font-size: 1.4em;
+  font-weight: 800;
+}
+
+
+.risk-insight,
+.risk-recommendation {
+  margin-top: 8px;
+  font-size: 0.95em;
+}
+
+.risk-recommendation {
+  line-height: 1.4;
 }
