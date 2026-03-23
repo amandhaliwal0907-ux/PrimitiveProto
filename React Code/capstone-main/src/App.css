@@ -446,3 +446,587 @@ input[type="file"]:hover {
   gap: 16px;
   align-items: center;
 }
+
+/* ============================================================
+   VIDEO GENERATION — append these to the bottom of App.css
+   ============================================================ */
+
+/* Container that wraps progress, player, error, and the button */
+.video-section {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ── Generate Video button ── */
+.generate-video-btn {
+  align-self: flex-start;
+}
+
+.generate-video-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* ── Progress bar ── */
+.video-progress-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.video-progress-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #4f46e5;           /* Adjust to match your primary colour */
+}
+
+.video-progress-track {
+  width: 100%;
+  height: 8px;
+  background: #e2e8f0;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.video-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #4f46e5, #7c3aed);
+  border-radius: 999px;
+  transition: width 0.6s ease;
+}
+
+.video-progress-hint {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  margin: 0;
+}
+
+/* ── Video player ── */
+.video-player-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.video-player {
+  width: 100%;
+  max-width: 640px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  background: #000;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.download-link {
+  align-self: flex-start;
+  font-size: 0.82rem;
+  color: #4f46e5;
+  text-decoration: none;
+  padding: 4px 0;
+}
+
+.download-link:hover {
+  text-decoration: underline;
+}
+
+/* ── Error state ── */
+.video-error {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  color: #dc2626;
+  font-size: 0.85rem;
+}
+
+.retry-btn {
+  flex-shrink: 0;
+  font-size: 0.8rem;
+  padding: 4px 10px;
+}
+
+/* ── "Video Generated" badge on the approved script card ── */
+.video-generated {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #16a34a;
+  background: #dcfce7;
+  padding: 2px 8px;
+  border-radius: 999px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+/* ============================================================
+   AUDIO GENERATION — append to the bottom of App.css
+   ============================================================ */
+
+.media-divider {
+  height: 1px;
+  background: #e2e8f0;
+  margin: 16px 0;
+}
+
+/* ── Audio section container ── */
+.audio-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ── Audio player ── */
+.audio-player-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.audio-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #374151;
+  margin: 0;
+}
+
+.audio-player {
+  width: 100%;
+  max-width: 480px;
+  border-radius: 6px;
+}
+
+/* ── Generating state ── */
+.audio-generating {
+  font-size: 0.85rem;
+  color: #7c3aed;
+  font-weight: 500;
+  padding: 8px 0;
+}
+
+.audio-spinner {
+  animation: spin 1.2s linear infinite;
+  display: inline-block;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* ── Voice picker + button row ── */
+.audio-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.voice-select {
+  flex: 1;
+  min-width: 200px;
+  padding: 7px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  background: #fff;
+  color: #374151;
+  cursor: pointer;
+}
+
+.voice-select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.generate-audio-btn {
+  white-space: nowrap;
+  font-size: 0.85rem;
+}
+
+/* ============================================================
+   SYNCED EXPLAINER PLAYER + MEDIA SECTION
+   Append to the bottom of App.css
+   ============================================================ */
+
+/* ── Media section wrapper ── */
+.media-section {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ── Two-column generation controls (video left, audio right) ── */
+.generation-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+@media (max-width: 640px) {
+  .generation-controls { grid-template-columns: 1fr; }
+}
+
+.gen-block {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.gen-block-label {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #374151;
+  margin: 0;
+}
+
+.gen-ready {
+  font-size: 0.82rem;
+  color: #16a34a;
+  font-weight: 500;
+  margin: 0;
+}
+
+/* ── Synced player wrapper ── */
+.synced-player-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.explainer-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #1e293b;
+  margin: 0;
+}
+
+/* ── Synced player ── */
+.synced-player {
+  background: #0f172a;
+  border-radius: 10px;
+  overflow: hidden;
+  max-width: 640px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25);
+}
+
+.synced-video-wrapper {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  cursor: pointer;
+}
+
+.synced-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Big play button overlay */
+.play-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.35);
+  border: none;
+  cursor: pointer;
+  font-size: 3rem;
+  color: #fff;
+  transition: background 0.2s;
+}
+
+.play-overlay:hover {
+  background: rgba(0, 0, 0, 0.5);
+}
+
+/* ── Custom controls bar ── */
+.synced-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: #1e293b;
+}
+
+.ctrl-btn {
+  background: none;
+  border: none;
+  color: #f1f5f9;
+  font-size: 1.1rem;
+  cursor: pointer;
+  padding: 2px 4px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.ctrl-btn:hover { color: #fff; }
+
+.ctrl-time {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Seek bar */
+.ctrl-seek-wrapper {
+  flex: 1;
+  position: relative;
+  height: 20px;
+  display: flex;
+  align-items: center;
+}
+
+.ctrl-seek-track {
+  position: absolute;
+  left: 0; right: 0;
+  height: 4px;
+  background: #334155;
+  border-radius: 999px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.ctrl-seek-fill {
+  height: 100%;
+  background: #6366f1;
+  border-radius: 999px;
+  transition: width 0.1s linear;
+}
+
+.ctrl-seek-input {
+  position: absolute;
+  left: 0; right: 0;
+  width: 100%;
+  opacity: 0;
+  cursor: pointer;
+  height: 20px;
+  margin: 0;
+}
+
+/* Volume slider */
+.ctrl-volume {
+  width: 64px;
+  cursor: pointer;
+  accent-color: #6366f1;
+  flex-shrink: 0;
+}
+
+/* Hint below player */
+.synced-hint {
+  font-size: 0.72rem;
+  color: #64748b;
+  padding: 6px 14px 10px;
+  background: #1e293b;
+  margin: 0;
+}
+
+/* ── Download links row ── */
+.download-links {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.download-link {
+  font-size: 0.82rem;
+  color: #4f46e5;
+  text-decoration: none;
+}
+
+.download-link:hover { text-decoration: underline; }
+
+/* ── Audio generating state ── */
+.audio-generating {
+  font-size: 0.85rem;
+  color: #7c3aed;
+  font-weight: 500;
+}
+
+.audio-spinner {
+  display: inline-block;
+  animation: spin 1.2s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* ── Audio controls ── */
+.audio-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.voice-select {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  background: #fff;
+  color: #374151;
+  cursor: pointer;
+}
+
+.voice-select:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* ── Progress bar (reused for video) ── */
+.video-progress-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.video-progress-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #4f46e5;
+}
+
+.video-progress-track {
+  width: 100%;
+  height: 6px;
+  background: #e2e8f0;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.video-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #4f46e5, #7c3aed);
+  border-radius: 999px;
+  transition: width 0.6s ease;
+}
+
+.video-progress-hint {
+  font-size: 0.72rem;
+  color: #94a3b8;
+  margin: 0;
+}
+
+/* ── Error state ── */
+.video-error {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  color: #dc2626;
+  font-size: 0.82rem;
+}
+
+.retry-btn {
+  font-size: 0.78rem;
+  padding: 3px 8px;
+  flex-shrink: 0;
+}
+
+/* ============================================================
+   MERGE DOWNLOAD — append to the bottom of App.css
+   ============================================================ */
+
+.merge-download-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.merge-download-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.merge-download-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.merge-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255,255,255,0.4);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.merge-progress-track {
+  width: 100%;
+  height: 5px;
+  background: #e2e8f0;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.merge-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #4f46e5, #7c3aed);
+  border-radius: 999px;
+  transition: width 0.4s ease;
+}
+
+.merge-hint {
+  font-size: 0.72rem;
+  color: #94a3b8;
+  margin: 0;
+}
+
+.merge-error {
+  font-size: 0.82rem;
+  color: #dc2626;
+  margin: 0;
+}
+
+.download-links {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.download-link-btn {
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-decoration: none;
+  background: #4f46e5;
+  color: #fff;
+}
+
+.download-link-btn.secondary {
+  background: #f1f5f9;
+  color: #374151;
+  border: 1px solid #e2e8f0;
+}
+
+.download-link-btn:hover {
+  opacity: 0.88;
+}
