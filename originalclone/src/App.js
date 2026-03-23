@@ -1,9 +1,11 @@
+//Updated App.js, includes confidence checking 
 import { useState, useEffect } from "react";
 import "./App.css";
 import Auth from "./Auth";
 import { supabase } from "./supabaseClient";
 import { extractFileText } from "./fileUtils";
 import ConversationAgent from "./ConversationAgent";
+import { fetchConfidence } from "./api"; // helper to call backend confidence API
 
 function App() {
   const [user, setUser] = useState(null);
@@ -16,9 +18,11 @@ function App() {
   const [showApprovedModal, setShowApprovedModal] = useState(false);
   const [voiceTranscript, setVoiceTranscript] = useState("");
 
+  // confidence state
+  const [confidenceResult, setConfidenceResult] = useState(null);
+  const [confidenceLoading, setConfidenceLoading] = useState(false);
 
   // Auth Session
-
   useEffect(() => {
     const fetchSession = async () => {
       const { data } = await supabase.auth.getSession();
@@ -34,9 +38,7 @@ function App() {
     return () => listener.subscription.unsubscribe();
   }, []);
 
-  
   // Fetch Drafts
-
   const fetchDrafts = async (removeDraftId = null) => {
     if (!user) return;
     const { data, error } = await supabase
@@ -44,11 +46,11 @@ function App() {
       .select("*")
       .eq("primitive_status", "draft")
       .eq("user_id", user.id)
-      
       .order("created_at", { ascending: false });
 
-    if (error) console.error("Error fetching drafts:", error);
-    else {
+    if (error) {
+      console.error("Error fetching drafts:", error);
+    } else {
       let updatedDrafts = data || [];
       if (removeDraftId) {
         updatedDrafts = updatedDrafts.filter((d) => d.id !== removeDraftId);
@@ -61,32 +63,30 @@ function App() {
     fetchDrafts();
   }, [user]);
 
- 
   // Fetch Approved Scripts
-  
   const fetchApprovedScripts = async () => {
     if (!user) return;
     const { data, error } = await supabase
       .from("primitives")
       .select("*")
-      .eq("user_id", user.id) 
-      .not("approved_script", "is", null)   
-      .neq("approved_script", "")         
+      .eq("user_id", user.id)
+      .not("approved_script", "is", null)
+      .neq("approved_script", "")
       .order("created_at", { ascending: false });
 
-    if (error) console.error("Error fetching approved scripts:", error);
-    else {
+    if (error) {
+      console.error("Error fetching approved scripts:", error);
+    } else {
       console.log("Approved scripts from DB:", data);
-      setApprovedScripts(data || []);}
+      setApprovedScripts(data || []);
+    }
   };
 
   useEffect(() => {
     fetchApprovedScripts();
   }, [user]);
 
-
   // Upload File
-
   const uploadFileToBucket = async () => {
     if (!file) return alert("Select a file first");
 
@@ -108,9 +108,7 @@ function App() {
     return checklist;
   };
 
- 
   // Generate Script + Primitive Draft
-
   const generateScript = async () => {
     if (!file) return alert("Select checklist first");
 
@@ -118,6 +116,7 @@ function App() {
       const checklist = await uploadFileToBucket();
       if (!checklist?.id) return alert("Checklist creation failed");
 
+      // original extracted file text
       const text = await extractFileText(file);
 
       const response = await fetch(
@@ -146,8 +145,9 @@ function App() {
           {
             user_id: user.id,
             primitive_id: checklist.id,
-            script_text: data.script,
+            script_text: data.script, // AI generated script
             primitive_draft: primitiveDraftToSave,
+            document_text: text, // original extracted document text
             primitive_status: "draft",
             script_status: "draft",
             workflow_state: "primitive_clarification",
@@ -160,9 +160,8 @@ function App() {
       const newDraft = newDraftArray?.[0];
       if (!newDraft) return alert("Draft creation failed");
 
-
       await fetchDrafts();
-      
+
       setFile(null);
       alert("Script and primitive draft generated successfully.");
     } catch (err) {
@@ -171,12 +170,11 @@ function App() {
     }
   };
 
-
   // Toggle Draft + Enhance Primitive
-
   const toggleDraft = async (draft) => {
     if (activeDraft?.id === draft.id) {
       setActiveDraft(null);
+      setConfidenceResult(null); // clear previous confidence result when closing
       return;
     }
 
@@ -192,14 +190,20 @@ function App() {
       return;
     }
 
+    // reset confidence when switching drafts
+    setConfidenceResult(null);
+
     setActiveDraft({ ...latestDraft, enhanced_primitive: null });
 
     const isPrimitiveEmpty = (primitiveObj) =>
-      !primitiveObj || !Object.values(primitiveObj).some((v) => (Array.isArray(v) ? v.length > 0 : !!v));
+      !primitiveObj ||
+      !Object.values(primitiveObj).some((v) =>
+        Array.isArray(v) ? v.length > 0 : !!v
+      );
 
     if (isPrimitiveEmpty(latestDraft.enhanced_primitive)) {
       try {
-        setActiveDraft((prev) => prev ? { ...prev, enhancing: true } : prev);
+        setActiveDraft((prev) => (prev ? { ...prev, enhancing: true } : prev));
 
         const res = await fetch(
           "https://javlnpnawmfpypapauyc.supabase.co/functions/v1/swift-responder",
@@ -213,7 +217,7 @@ function App() {
         if (!res.ok) {
           const errText = await res.text();
           console.error("Smooth-Action Error:", errText);
-          setActiveDraft((prev) => prev ? { ...prev, enhancing: false } : prev);
+          setActiveDraft((prev) => (prev ? { ...prev, enhancing: false } : prev));
           return;
         }
 
@@ -226,95 +230,160 @@ function App() {
           .eq("id", draft.id)
           .eq("user_id", user.id);
 
-        if (updateError) console.error("Error saving enhanced primitive:", updateError);
+        if (updateError) {
+          console.error("Error saving enhanced primitive:", updateError);
+        }
 
         setDrafts((prev) =>
-          prev.map((d) => (d.id === draft.id ? { ...d, enhanced_primitive: enhancedPrimitive } : d))
+          prev.map((d) =>
+            d.id === draft.id ? { ...d, enhanced_primitive: enhancedPrimitive } : d
+          )
         );
+
         setActiveDraft((prev) =>
-          prev ? { ...prev, enhanced_primitive: enhancedPrimitive, enhancing: false } : prev
+          prev
+            ? {
+                ...prev,
+                enhanced_primitive: enhancedPrimitive,
+                enhancing: false,
+              }
+            : prev
         );
       } catch (err) {
         console.error("Error calling smooth-action:", err);
-        setActiveDraft((prev) => prev ? { ...prev, enhancing: false } : prev);
+        setActiveDraft((prev) => (prev ? { ...prev, enhancing: false } : prev));
       }
     } else {
       setActiveDraft(latestDraft);
     }
   };
 
+  // Confidence check on generated draft
+  const handleCheckConfidence = async () => {
+    if (!activeDraft) {
+      alert("No active draft selected.");
+      return;
+    }
 
-// ApprovedScriptCard Component
+    // use enhanced primitive first, fallback to primitive draft
+    const primitive =
+      activeDraft.enhanced_primitive ||
+      activeDraft.primitive_draft ||
+      {};
 
-function ApprovedScriptCard({ script, user }) {
-  const [showHistory, setShowHistory] = useState(false);
-  const [history, setHistory] = useState(null);
+    const primitiveText =
+      typeof primitive === "string"
+        ? primitive
+        : JSON.stringify(primitive, null, 2);
 
-  const fetchHistory = async () => {
-    if (history) return setShowHistory((prev) => !prev); 
+    // try common field names in case structure varies
+    const who = primitive.who || primitive.actor || "";
+    const what = primitive.what || primitive.action || "";
+    const where = primitive.where || primitive.location || "";
+    const precondition =
+      primitive.precondition || primitive.condition || "";
+
+    const documentText = activeDraft.document_text || "";
+
+    if (!documentText) {
+      alert("Document text is missing for this draft.");
+      return;
+    }
 
     try {
-      const { data: draftData } = await supabase
-        .from("draft_scripts")
-        .select("primitive_draft, enhanced_primitive")
-        .eq("user_id", user.id)
-        .eq("primitive_id", script.script_id)
-        .maybeSingle();
+      setConfidenceLoading(true);
+      setConfidenceResult(null);
 
-      const { data: primData } = await supabase
-        .from("primitives")
-        .select("final_script, approved_script")
-        .eq("user_id", user.id)
-        .eq("script_id", script.script_id)
-        .maybeSingle();
+      const result = await fetchConfidence({
+        // primitive_id: activeDraft.id,
+  //primitive_text: primitiveText,
+  //who,
+  //what,
+  //where,
+ // precondition,
+ // document_text: documentText,
 
-      setHistory({
-        draft: draftData || {},
-        primitive: primData || {},
+ //changes made here based on cluade
+        script_text: activeDraft.script_text,
+        document_text: documentText,
       });
-      setShowHistory(true);
-    } catch (err) {
-      console.error("Error fetching history:", err);
-      alert("Failed to fetch history");
+
+      setConfidenceResult(result);
+    } catch (error) {
+      console.error("Confidence check failed:", error);
+      alert("Confidence check failed.");
+    } finally {
+      setConfidenceLoading(false);
     }
   };
 
-  return (
-    <div className="approved-script-card">
-      <h4>Checklist ID: {script.script_id}</h4>
-      <pre className="script-content">{script.approved_script}</pre>
+  // ApprovedScriptCard Component
+  function ApprovedScriptCard({ script, user }) {
+    const [showHistory, setShowHistory] = useState(false);
+    const [history, setHistory] = useState(null);
 
-      <button className="primary-btn" onClick={fetchHistory}>
-        {showHistory ? "Hide History" : "View History"}
-      </button>
+    const fetchHistory = async () => {
+      if (history) return setShowHistory((prev) => !prev);
 
-      {showHistory && history && (
-        <div className="history-panel">
-          <h5>Draft Scripts</h5>
-          <div className="card">
-            <strong>Primitive Draft:</strong>
-            <pre>{JSON.stringify(history.draft.primitive_draft, null, 2)}</pre>
-            <strong>Enhanced Primitive:</strong>
-            <pre>{JSON.stringify(history.draft.enhanced_primitive, null, 2)}</pre>
+      try {
+        const { data: draftData } = await supabase
+          .from("draft_scripts")
+          .select("primitive_draft, enhanced_primitive")
+          .eq("user_id", user.id)
+          .eq("primitive_id", script.script_id)
+          .maybeSingle();
+
+        const { data: primData } = await supabase
+          .from("primitives")
+          .select("final_script, approved_script")
+          .eq("user_id", user.id)
+          .eq("script_id", script.script_id)
+          .maybeSingle();
+
+        setHistory({
+          draft: draftData || {},
+          primitive: primData || {},
+        });
+        setShowHistory(true);
+      } catch (err) {
+        console.error("Error fetching history:", err);
+        alert("Failed to fetch history");
+      }
+    };
+
+    return (
+      <div className="approved-script-card">
+        <h4>Checklist ID: {script.script_id}</h4>
+        <pre className="script-content">{script.approved_script}</pre>
+
+        <button className="primary-btn" onClick={fetchHistory}>
+          {showHistory ? "Hide History" : "View History"}
+        </button>
+
+        {showHistory && history && (
+          <div className="history-panel">
+            <h5>Draft Scripts</h5>
+            <div className="card">
+              <strong>Primitive Draft:</strong>
+              <pre>{JSON.stringify(history.draft.primitive_draft, null, 2)}</pre>
+              <strong>Enhanced Primitive:</strong>
+              <pre>{JSON.stringify(history.draft.enhanced_primitive, null, 2)}</pre>
+            </div>
+
+            <h5>Primitives Table</h5>
+            <div className="card">
+              <strong>Final Script:</strong>
+              <pre>{history.primitive.final_script}</pre>
+              <strong>Approved Script:</strong>
+              <pre>{history.primitive.approved_script}</pre>
+            </div>
           </div>
-
-          <h5>Primitives Table</h5>
-          <div className="card">
-            <strong>Final Script:</strong>
-            <pre>{history.primitive.final_script}</pre>
-            <strong>Approved Script:</strong>
-            <pre>{history.primitive.approved_script}</pre>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-
+        )}
+      </div>
+    );
+  }
 
   // Rendering
-
   if (loading) return <div>Loading...</div>;
   if (!user) return <Auth setUser={setUser} />;
 
@@ -323,7 +392,10 @@ function ApprovedScriptCard({ script, user }) {
       {/* Sticky Top Header */}
       <div className="top-header sticky-header">
         <h3>Welcome, {user.email}</h3>
-        <button className="secondary-btn" onClick={() => supabase.auth.signOut()}>
+        <button
+          className="secondary-btn"
+          onClick={() => supabase.auth.signOut()}
+        >
           Logout
         </button>
       </div>
@@ -336,8 +408,10 @@ function ApprovedScriptCard({ script, user }) {
           <div className="card upload-section">
             <h3>Upload Checklist</h3>
             <input type="file" onChange={(e) => setFile(e.target.files[0])} />
-            
-            <button className="primary-btn" onClick={generateScript}>Generate Script</button>
+
+            <button className="primary-btn" onClick={generateScript}>
+              Generate Script
+            </button>
           </div>
 
           {/* Draft List */}
@@ -346,15 +420,15 @@ function ApprovedScriptCard({ script, user }) {
             {drafts.length === 0 && <p>No drafts yet.</p>}
             {drafts.map((d) => (
               <div key={d.id} className="draft-card">
-                
                 <p><strong>Script Status:</strong> {d.script_status}</p>
                 <p><strong>Checklist ID:</strong> {d.primitive_id}</p>
                 <p>{d.script_text}</p>
-                <button className="secondary-btn" onClick={() => toggleDraft(d)}>
+                <button
+                  className="secondary-btn"
+                  onClick={() => toggleDraft(d)}
+                >
                   {activeDraft?.id === d.id ? "Close Draft" : "Open Draft"}
                 </button>
-                
-               
               </div>
             ))}
           </div>
@@ -365,7 +439,8 @@ function ApprovedScriptCard({ script, user }) {
           {/* Active Draft Panel */}
           {activeDraft && (
             <div className="active-draft-panel">
-              <h4>Checklist/Primitive ID: {activeDraft.primitive_id}</h4> 
+              <h4>Checklist/Primitive ID: {activeDraft.primitive_id}</h4>
+
               <div className="card primitive-panel">
                 <h3>Original Primitive</h3>
                 <pre>{JSON.stringify(activeDraft.primitive_draft, null, 2)}</pre>
@@ -373,78 +448,116 @@ function ApprovedScriptCard({ script, user }) {
 
               <div className="card enhanced-panel">
                 <h3>Enhanced Primitive</h3>
-               <pre>
-{JSON.stringify(activeDraft.enhanced_primitive, (key, value) => {
-    if (Array.isArray(value)) return value.join('\n - ');
-    return value;
-}, 2)}
-</pre>
+                <pre>
+                  {JSON.stringify(
+                    activeDraft.enhanced_primitive,
+                    (key, value) => {
+                      if (Array.isArray(value)) return value.join("\n - ");
+                      return value;
+                    },
+                    2
+                  )}
+                </pre>
+
+                {/* confidence check button */}
+                <button
+                  className="primary-btn"
+                  onClick={handleCheckConfidence}
+                  disabled={confidenceLoading}
+                >
+                  {confidenceLoading ? "Checking Confidence..." : "Check Confidence"}
+                </button>
+
+                {/* confidence result display */}
+                {confidenceResult && (
+                  <div className="card confidence-panel">
+                    <h3>Confidence Result</h3>
+
+                    <p><strong>Score:</strong> {confidenceResult.confidence_score}</p>
+                    <p><strong>Decision:</strong> {confidenceResult.decision}</p>
+                    <p><strong>Reason:</strong> {confidenceResult.reason}</p>
+
+                    <h4>Matched Evidence</h4>
+                    <ul>
+                      {confidenceResult.matched_evidence?.map((item, i) => (
+                        <li key={i}>{item}</li>
+                      ))}
+                    </ul>
+
+                    <h4>Missing Evidence</h4>
+                    <ul>
+                      {confidenceResult.missing_evidence?.map((item, i) => (
+                        <li key={i}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </div>
 
               {!activeDraft.chatStarted && (
                 <button
                   className="primary-btn"
-                  onClick={() => setActiveDraft((prev) => ({ ...prev, chatStarted: true }))}
+                  onClick={() =>
+                    setActiveDraft((prev) => ({ ...prev, chatStarted: true }))
+                  }
                 >
                   Start Chat
                 </button>
               )}
 
-   {activeDraft.chatStarted && (
-  <ConversationAgent
-    draft={activeDraft}
-    refresh={(removeDraftId, newApprovedScript = null) => {
-     
-      fetchDrafts(removeDraftId);
+              {activeDraft.chatStarted && (
+                <ConversationAgent
+                  draft={activeDraft}
+                  refresh={(removeDraftId, newApprovedScript = null) => {
+                    fetchDrafts(removeDraftId);
 
+                    if (newApprovedScript) {
+                      setApprovedScripts((prev) => [newApprovedScript, ...prev]);
+                    } else {
+                      fetchApprovedScripts();
+                    }
 
-      if (newApprovedScript) {
-        setApprovedScripts(prev => [newApprovedScript, ...prev]);
-      } else {
-        fetchApprovedScripts();
-      }
-
-
-      setActiveDraft(prev => (prev?.id === removeDraftId ? null : prev));
-    }}
-/>
+                    setActiveDraft((prev) =>
+                      prev?.id === removeDraftId ? null : prev
+                    );
+                  }}
+                />
               )}
             </div>
           )}
 
-         {/* Approved Scripts */}
-{/* Button to open approved scripts modal */}
-<button
-  className="view-btn"
-  onClick={() => setShowApprovedModal(true)}
->
-  View Approved Scripts
-</button>
+          {/* Approved Scripts */}
+          <button
+            className="view-btn"
+            onClick={() => setShowApprovedModal(true)}
+          >
+            View Approved Scripts
+          </button>
 
-{/* Modal / Blanket */}
-{showApprovedModal && (
-  <div className="approved-modal">
-  <div className="modal-content">
-    <div className="modal-header">
-      <h3>Approved Scripts</h3>
-      <button
-        className="close-btn"
-        onClick={() => setShowApprovedModal(false)}
-      >
-        Close
-      </button>
-    </div>
-    <div className="modal-body">
-      <div className="approved-scripts-list">
-        {approvedScripts.length === 0 && <p>No approved scripts yet.</p>}
-        {approvedScripts.map((d) => (
-          <ApprovedScriptCard key={d.id} script={d} user={user} />
-        ))}
-      </div>
-    </div>
-  </div>
-</div>
-)}
+          {/* Modal / Blanket */}
+          {showApprovedModal && (
+            <div className="approved-modal">
+              <div className="modal-content">
+                <div className="modal-header">
+                  <h3>Approved Scripts</h3>
+                  <button
+                    className="close-btn"
+                    onClick={() => setShowApprovedModal(false)}
+                  >
+                    Close
+                  </button>
+                </div>
+                <div className="modal-body">
+                  <div className="approved-scripts-list">
+                    {approvedScripts.length === 0 && <p>No approved scripts yet.</p>}
+                    {approvedScripts.map((d) => (
+                      <ApprovedScriptCard key={d.id} script={d} user={user} />
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
