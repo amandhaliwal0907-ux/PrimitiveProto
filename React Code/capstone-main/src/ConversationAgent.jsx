@@ -10,9 +10,15 @@ const PRIMITIVE_FIELDS = [
   "failure_consequences",
 ];
 
+const isEmptyValue = (value) =>
+  value === undefined ||
+  value === null ||
+  (typeof value === "string" && value.trim() === "") ||
+  (Array.isArray(value) && value.length === 0);
+
 export default function ConversationAgent({ draft, refresh }) {
-  // ---------------- State ----------------
   const initialPrimitive = draft?.enhanced_primitive || draft?.primitive_draft || {};
+
   const [primitive, setPrimitive] = useState(initialPrimitive);
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -20,70 +26,105 @@ export default function ConversationAgent({ draft, refresh }) {
   const [regeneratedScript, setRegeneratedScript] = useState("");
   const [showRegenerateButton, setShowRegenerateButton] = useState(false);
   const [guidedStep, setGuidedStep] = useState(0);
-  const chatEndRef = useRef(null);
 
-  // ---------------- Sync primitive when draft changes ----------------
+  const chatEndRef = useRef(null);
+  const hasShownCompletionRef = useRef(false);
+
+  // ---------------- Sync when draft changes ----------------
   useEffect(() => {
     setPrimitive(draft?.enhanced_primitive || draft?.primitive_draft || {});
+    setMessages([]);
+    setLoading(false);
+    setInput("");
+    setRegeneratedScript("");
+    setShowRegenerateButton(false);
+    setGuidedStep(0);
+    hasShownCompletionRef.current = false;
   }, [draft]);
 
   const missingFields = () =>
-    PRIMITIVE_FIELDS.filter((f) => primitive?.[f] === undefined);
+    PRIMITIVE_FIELDS.filter((field) => isEmptyValue(primitive?.[field]));
 
-  const scrollToBottom = () => chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  const scrollToBottom = () => {
+    setTimeout(() => {
+      chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, 0);
+  };
+
   const appendMessage = (role, content) => {
     setMessages((prev) => [...prev, { role, content }]);
     scrollToBottom();
   };
 
+  // ---------------- Guided helper ----------------
   useEffect(() => {
     const fields = missingFields();
 
-    // Only show guided-step suggestions
     if (fields.length > 0 && guidedStep < fields.length) {
       const field = fields[guidedStep];
       const suggestion = draft?.enhanced_primitive?.[field] || "";
 
-      appendMessage(
-        "assistant",
-        `Field "${field}" is missing. Suggested: "${suggestion}"`
+      const alreadyShown = messages.some(
+        (msg) =>
+          msg.role === "assistant" &&
+          msg.content.includes(`Field "${field}" is missing`)
       );
+
+      if (!alreadyShown) {
+        appendMessage(
+          "assistant",
+          `Field "${field}" is missing. Suggested: "${suggestion}"`
+        );
+      }
     }
 
-    // Show completion message only once
-    if (fields.length === 0 && messages[messages.length - 1]?.role !== "assistant") {
+    if (fields.length === 0 && !hasShownCompletionRef.current) {
+      hasShownCompletionRef.current = true;
       appendMessage(
         "assistant",
-        `All required fields are complete.\n\nDo you want to make any further changes or approve?`
+        "All required fields are complete.\n\nYou can approve this primitive now."
       );
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [guidedStep, primitive]);
 
-  // ---------------- Accept / Skip ----------------
+  // ---------------- Save Primitive Draft ----------------
   const savePrimitiveDraft = async (updated) => {
     setPrimitive(updated);
-    await supabase
+
+    const { error } = await supabase
       .from("draft_scripts")
       .update({ primitive_draft: updated })
       .eq("id", draft.id);
+
+    if (error) {
+      console.error("Failed to save primitive draft:", error);
+      appendMessage("assistant", "Failed to save draft changes.");
+    }
   };
 
+  // ---------------- Accept / Skip ----------------
   const handleAcceptAI = async () => {
     const fields = missingFields();
     if (!fields.length) return;
+
     const field = fields[guidedStep];
     const value = draft?.enhanced_primitive?.[field];
-    if (value) {
+
+    if (!isEmptyValue(value)) {
       const updated = { ...primitive, [field]: value };
       await savePrimitiveDraft(updated);
       appendMessage("assistant", `Accepted AI suggestion for "${field}".`);
       setGuidedStep((prev) => prev + 1);
+    } else {
+      appendMessage("assistant", `No AI suggestion available for "${field}".`);
     }
   };
 
   const handleSkip = async () => {
     const fields = missingFields();
     if (!fields.length) return;
+
     const field = fields[guidedStep];
     const updated = { ...primitive, [field]: "" };
     await savePrimitiveDraft(updated);
@@ -95,7 +136,10 @@ export default function ConversationAgent({ draft, refresh }) {
   const handleUserInput = async (text) => {
     if (!text.trim()) return;
 
-    appendMessage("user", text);
+    const userMessage = { role: "user", content: text };
+    const updatedMessages = [...messages, userMessage];
+
+    setMessages(updatedMessages);
     setInput("");
     setLoading(true);
 
@@ -107,7 +151,7 @@ export default function ConversationAgent({ draft, refresh }) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             instruction: text,
-            messages,
+            messages: updatedMessages,
             currentPrimitive: primitive,
           }),
         }
@@ -121,20 +165,14 @@ export default function ConversationAgent({ draft, refresh }) {
 
         appendMessage(
           "assistant",
-          `Primitive Updated:\n${JSON.stringify(
-            updatedPrimitive,
-            null,
-            2
-          )}\n\nDo you want to make further changes or approve?`
+          `Primitive updated.\n${JSON.stringify(updatedPrimitive, null, 2)}`
         );
         setPrimitive(updatedPrimitive);
       } else {
-        appendMessage(
-          "assistant",
-          `${data?.aiMessage || "AI did not respond."}\n\nDo you want to make further changes or approve?`
-        );
+        appendMessage("assistant", data?.aiMessage || "AI did not respond.");
       }
-    } catch {
+    } catch (err) {
+      console.error("handleUserInput error:", err);
       appendMessage("assistant", "Could not process instruction.");
     } finally {
       setLoading(false);
@@ -144,69 +182,57 @@ export default function ConversationAgent({ draft, refresh }) {
   // ---------------- Approve Primitive ----------------
   const handleApprove = async () => {
     try {
-      if (!draft.primitive_id) {
-        appendMessage("assistant", "Cannot approve: primitive_id missing in draft.");
+      if (!draft?.id) {
+        appendMessage("assistant", "Cannot approve: draft id is missing.");
         return;
       }
+
       if (!primitive || Object.keys(primitive).length === 0) {
         appendMessage("assistant", "Cannot approve: primitive is empty.");
         return;
       }
 
-      const { error } = await supabase
-        .from("primitives")
-        .insert({
-          script_id: draft.primitive_id,
-          primitive_json: primitive,
-        });
-
-      if (error) {
-        appendMessage("assistant", `Approval failed: ${error.message}`);
-        return;
-      }
-
-      const { error: workflowError } = await supabase
+      const { error: saveEnhancedError } = await supabase
         .from("draft_scripts")
-        .update({ workflow_state: "video_ready" })
+        .update({
+          enhanced_primitive: primitive,
+          workflow_state: "video_ready",
+        })
         .eq("id", draft.id);
 
-      if (workflowError) {
-        appendMessage("assistant", `Failed to update draft workflow: ${workflowError.message}`);
+      if (saveEnhancedError) {
+        appendMessage(
+          "assistant",
+          `Failed to approve primitive: ${saveEnhancedError.message}`
+        );
         return;
       }
 
-      appendMessage("assistant", "Primitive approved for video generation.");
-      refresh();
+      appendMessage(
+        "assistant",
+        `Primitive approved.\n\nNow click "Regenerate Script" to generate the final approved script.`
+      );
+
       setShowRegenerateButton(true);
     } catch (err) {
-      appendMessage("assistant", `Approval failed: ${err.message}`);
       console.error("handleApprove error:", err);
+      appendMessage("assistant", `Approval failed: ${err.message}`);
     }
   };
 
   // ---------------- Regenerate Script ----------------
   const handleRegenerateScript = async () => {
     setLoading(true);
+
     try {
-      if (!draft?.primitive_id) {
-        appendMessage("assistant", "Cannot regenerate: primitive_id missing in draft.");
+      if (!draft?.id) {
+        appendMessage("assistant", "Cannot regenerate: draft id missing.");
         return;
       }
 
-      const scriptId = draft.primitive_id;
+      const primitiveToUse = primitive;
 
-      const { data: primData, error: fetchError } = await supabase
-        .from("primitives")
-        .select("primitive_json")
-        .eq("script_id", scriptId)
-        .maybeSingle();
-
-      if (fetchError) {
-        appendMessage("assistant", "Failed to fetch primitive.");
-        return;
-      }
-
-      if (!primData?.primitive_json) {
+      if (!primitiveToUse || Object.keys(primitiveToUse).length === 0) {
         appendMessage("assistant", "Primitive data not found, cannot regenerate.");
         return;
       }
@@ -216,12 +242,11 @@ export default function ConversationAgent({ draft, refresh }) {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ primitive: primData.primitive_json }),
+          body: JSON.stringify({ primitive: primitiveToUse }),
         }
       );
 
       if (!res.ok) {
-        const errText = await res.text();
         appendMessage("assistant", "Script regeneration failed (API error).");
         return;
       }
@@ -233,20 +258,13 @@ export default function ConversationAgent({ draft, refresh }) {
         return;
       }
 
-      const { error: updateError } = await supabase
-        .from("primitives")
-        .update({ final_script: data.script })
-        .eq("script_id", scriptId);
-
-      if (updateError) {
-        appendMessage("assistant", "Failed to save regenerated script.");
-        return;
-      }
-
       setRegeneratedScript(data.script);
-      appendMessage("assistant", "Script regenerated and saved successfully.");
-
+      appendMessage(
+        "assistant",
+        "Script regenerated successfully. Review it below, then click 'Approve Regenerated Script' to save it."
+      );
     } catch (err) {
+      console.error("handleRegenerateScript error:", err);
       appendMessage("assistant", "Script regeneration failed.");
     } finally {
       setLoading(false);
@@ -254,29 +272,70 @@ export default function ConversationAgent({ draft, refresh }) {
   };
 
   // ---------------- Approve Regenerated Script ----------------
- const handleApproveRegeneratedScript = async () => {
-  if (!regeneratedScript) return;
+  const handleApproveRegeneratedScript = async () => {
+    if (!regeneratedScript) return;
 
-  const { error: updateError } = await supabase
-    .from("primitives")
-    .update({ approved_script: regeneratedScript })
-    .eq("script_id", draft.primitive_id);
+    try {
+      if (!draft?.id) {
+        appendMessage("assistant", "Cannot save approved script: draft id missing.");
+        return;
+      }
 
-  if (updateError) {
-    appendMessage("assistant", "Failed to approve regenerated script.");
-    return;
-  }
+      if (!draft?.user_id) {
+        appendMessage("assistant", "Cannot save approved script: user id missing.");
+        return;
+      }
 
-  appendMessage("assistant", "Regenerated script approved.");
+      const { data: lastVersionRows, error: versionError } = await supabase
+        .from("approved_scripts")
+        .select("version_number")
+        .eq("draft_id", draft.id)
+        .order("version_number", { ascending: false })
+        .limit(1);
 
-  // Pass the approved script to parent so it updates the list immediately
-  refresh(draft.id, { ...draft, approved_script: regeneratedScript });
+      if (versionError) {
+        appendMessage(
+          "assistant",
+          `Failed to get version number: ${versionError.message}`
+        );
+        return;
+      }
 
-  // Clear local regenerated script state
-  setRegeneratedScript("");
+      const nextVersion = (lastVersionRows?.[0]?.version_number || 0) + 1;
 
-  
-};
+      const { error: insertError } = await supabase
+        .from("approved_scripts")
+        .insert([
+          {
+            draft_id: draft.id,
+            user_id: draft.user_id,
+            primitive_json: primitive,
+            final_script: regeneratedScript,
+            approved_script: regeneratedScript,
+            version_number: nextVersion,
+            updated_at: new Date().toISOString(),
+          },
+        ]);
+
+      if (insertError) {
+        appendMessage("assistant", "Failed to approve regenerated script.");
+        return;
+      }
+
+      appendMessage(
+        "assistant",
+        `Regenerated script approved and saved to history as version v${nextVersion}.`
+      );
+
+      setRegeneratedScript("");
+      setShowRegenerateButton(false);
+
+      await refresh();
+    } catch (err) {
+      console.error("handleApproveRegeneratedScript error:", err);
+      appendMessage("assistant", "Failed to approve regenerated script.");
+    }
+  };
 
   // ---------------- Render ----------------
   return (
@@ -293,20 +352,28 @@ export default function ConversationAgent({ draft, refresh }) {
       <div className="guided-buttons">
         {missingFields().length > 0 && (
           <>
-            <button className="primary-btn" onClick={handleAcceptAI}>Accept AI</button>
-            <button className="secondary-btn" onClick={handleSkip}>Skip</button>
+            <button className="primary-btn" onClick={handleAcceptAI} disabled={loading}>
+              Accept AI
+            </button>
+            <button className="secondary-btn" onClick={handleSkip} disabled={loading}>
+              Skip
+            </button>
           </>
         )}
-        <button className="primary-btn" onClick={handleApprove}>Approve</button>
+
+        <button className="primary-btn" onClick={handleApprove} disabled={loading}>
+          Approve Primitive
+        </button>
       </div>
 
       <textarea
         rows={3}
         value={input}
         onChange={(e) => setInput(e.target.value)}
-        placeholder='Type instructions or edits...'
+        placeholder="Type instructions or edits..."
       />
-      <button onClick={() => handleUserInput(input)} disabled={loading}>
+
+      <button onClick={() => handleUserInput(input)} disabled={loading || !input.trim()}>
         {loading ? "Processing..." : "Send"}
       </button>
 
@@ -324,7 +391,7 @@ export default function ConversationAgent({ draft, refresh }) {
             value={regeneratedScript}
             onChange={(e) => setRegeneratedScript(e.target.value)}
           />
-          <button onClick={handleApproveRegeneratedScript}>
+          <button onClick={handleApproveRegeneratedScript} disabled={loading}>
             Approve Regenerated Script
           </button>
         </div>
