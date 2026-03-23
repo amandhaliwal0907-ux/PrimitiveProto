@@ -1,0 +1,15 @@
+{
+  "files": {
+    "main.css": "/PrimitiveProto/static/css/main.fd98e454.css",
+    "main.js": "/PrimitiveProto/static/js/main.437142fd.js",
+    "static/js/453.0621080e.chunk.js": "/PrimitiveProto/static/js/453.0621080e.chunk.js",
+    "index.html": "/PrimitiveProto/index.html",
+    "main.fd98e454.css.map": "/PrimitiveProto/static/css/main.fd98e454.css.map",
+    "main.437142fd.js.map": "/PrimitiveProto/static/js/main.437142fd.js.map",
+    "453.0621080e.chunk.js.map": "/PrimitiveProto/static/js/453.0621080e.chunk.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.fd98e454.css",
+    "static/js/main.437142fd.js"
+  ]
+}
