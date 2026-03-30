@@ -1,11 +1,31 @@
-//Updated App.js, includes confidence checking 
-import { useState, useEffect } from "react";
+// Merged App.js
+// - Confidence checking (their code)
+// - Approved scripts modal (their code)
+// - Combined single-button video + audio generation with synced player
+
+import { useState, useEffect, useRef } from "react";
 import "./App.css";
 import Auth from "./Auth";
 import { supabase } from "./supabaseClient";
 import { extractFileText } from "./fileUtils";
 import ConversationAgent from "./ConversationAgent";
-import { fetchConfidence } from "./api"; // helper to call backend confidence API
+import { fetchConfidence } from "./api";
+import SyncedPlayer from "./SyncedPlayer";
+
+const SUPABASE_FUNCTIONS_URL = "https://javlnpnawmfpypapauyc.supabase.co/functions/v1";
+const POLL_INTERVAL_MS = 10_000;
+const MAX_POLL_ATTEMPTS = 30;
+
+const VOICE_OPTIONS = [
+  { value: "Mark",  label: "Mark" },
+  { value: "Maya",  label: "Maya" },
+  { value: "James", label: "James" },
+];
+
+const getAuthToken = async () => {
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token ?? "";
+};
 
 function App() {
   const [user, setUser] = useState(null);
@@ -19,8 +39,6 @@ function App() {
   // Confidence state
   const [confidenceResult, setConfidenceResult] = useState(null);
   const [confidenceLoading, setConfidenceLoading] = useState(false);
-  const [regenerating, setRegenerating] = useState(false);
-  const [selectedDraft, setSelectedDraft] = useState(null);
 
   // Per-script generation state
   // phase: "idle" | "generating" | "done" | "failed"
@@ -145,8 +163,6 @@ function App() {
     try {
       const checklist = await uploadFileToBucket();
       if (!checklist?.id) return alert("Checklist creation failed");
-
-      // original extracted file text
       const text = await extractFileText(file);
       const response = await fetch(`${SUPABASE_FUNCTIONS_URL}/swift-responder`, {
         method: "POST",
@@ -158,20 +174,16 @@ function App() {
       if (!data.script) return alert("Script generation failed (no script returned)");
       const { data: newDraftArray, error: draftError } = await supabase
         .from("draft_scripts")
-        .insert([
-          {
-            user_id: user.id,
-            primitive_id: checklist.id,
-            script_text: data.script, // AI generated script
-            primitive_draft: primitiveDraftToSave,
-            document_text: text, // original extracted document text
-            primitive_status: "draft",
-            script_status: "draft",
-            workflow_state: "primitive_clarification",
-          },
-        ])
-        .select();
-
+        .insert([{
+          user_id: user.id,
+          primitive_id: checklist.id,
+          script_text: data.script,
+          primitive_draft: data.primitive || {},
+          document_text: text,
+          primitive_status: "draft",
+          script_status: "draft",
+          workflow_state: "primitive_clarification",
+        }]).select();
       if (draftError) return alert("Failed to save draft: " + draftError.message);
       if (!newDraftArray?.[0]) return alert("Draft creation failed");
       await fetchDrafts();
@@ -189,24 +201,14 @@ function App() {
   const toggleDraft = async (draft) => {
     if (activeDraft?.id === draft.id) {
       setActiveDraft(null);
-      setConfidenceResult(null); // clear previous confidence result when closing
+      setConfidenceResult(null);
       return;
     }
     const { data: latestDraft, error } = await supabase
-      .from("draft_scripts")
-      .select("*")
-      .eq("id", draft.id)
-      .eq("user_id", user.id)
-      .single();
-
-    if (error || !latestDraft) {
-      console.error("Draft not found or unauthorized:", error);
-      return;
-    }
-
-    // reset confidence when switching drafts
+      .from("draft_scripts").select("*")
+      .eq("id", draft.id).eq("user_id", user.id).single();
+    if (error || !latestDraft) { console.error("Draft not found:", error); return; }
     setConfidenceResult(null);
-
     setActiveDraft({ ...latestDraft, enhanced_primitive: null });
 
     const isPrimitiveEmpty = (obj) =>
@@ -223,32 +225,10 @@ function App() {
         if (!res.ok) { setActiveDraft((prev) => prev ? { ...prev, enhancing: false } : prev); return; }
         const data = await res.json();
         const enhancedPrimitive = data.primitive || {};
-
-        const { error: updateError } = await supabase
-          .from("draft_scripts")
-          .update({ enhanced_primitive: enhancedPrimitive })
-          .eq("id", draft.id)
-          .eq("user_id", user.id);
-
-        if (updateError) {
-          console.error("Error saving enhanced primitive:", updateError);
-        }
-
-        setDrafts((prev) =>
-          prev.map((d) =>
-            d.id === draft.id ? { ...d, enhanced_primitive: enhancedPrimitive } : d
-          )
-        );
-
-        setActiveDraft((prev) =>
-          prev
-            ? {
-                ...prev,
-                enhanced_primitive: enhancedPrimitive,
-                enhancing: false,
-              }
-            : prev
-        );
+        await supabase.from("draft_scripts").update({ enhanced_primitive: enhancedPrimitive })
+          .eq("id", draft.id).eq("user_id", user.id);
+        setDrafts((prev) => prev.map((d) => d.id === draft.id ? { ...d, enhanced_primitive: enhancedPrimitive } : d));
+        setActiveDraft((prev) => prev ? { ...prev, enhanced_primitive: enhancedPrimitive, enhancing: false } : prev);
       } catch (err) {
         console.error("Error enhancing primitive:", err);
         setActiveDraft((prev) => prev ? { ...prev, enhancing: false } : prev);
@@ -258,150 +238,26 @@ function App() {
     }
   };
 
-  // Confidence check on generated draft
+  // -------------------------------
+  // Confidence Check
+  // -------------------------------
   const handleCheckConfidence = async () => {
-    if (!activeDraft) {
-      alert("No active draft selected.");
-      return;
-    }
-
-    // use enhanced primitive first, fallback to primitive draft
-    const primitive =
-      activeDraft.enhanced_primitive ||
-      activeDraft.primitive_draft ||
-      {};
-
-    const primitiveText =
-      typeof primitive === "string"
-        ? primitive
-        : JSON.stringify(primitive, null, 2);
-
-    // try common field names in case structure varies
-    const who = primitive.who || primitive.actor || "";
-    const what = primitive.what || primitive.action || "";
-    const where = primitive.where || primitive.location || "";
-    const precondition =
-      primitive.precondition || primitive.condition || "";
-
+    if (!activeDraft) { alert("No active draft selected."); return; }
     const documentText = activeDraft.document_text || "";
-
-    if (!documentText) {
-      alert("Document text is missing for this draft.");
-      return;
-    }
-
+    if (!documentText) { alert("Document text is missing for this draft."); return; }
     try {
       setConfidenceLoading(true);
       setConfidenceResult(null);
-
       const result = await fetchConfidence({
-        // primitive_id: activeDraft.id,
-  //primitive_text: primitiveText,
-  //who,
-  //what,
-  //where,
- // precondition,
- // document_text: documentText,
-
- //changes made here based on cluade
         script_text: activeDraft.script_text,
         document_text: documentText,
       });
       setConfidenceResult(result);
-      setSelectedDraft(result.recommended);
     } catch (error) {
       console.error("Confidence check failed:", error);
       alert("Confidence check failed.");
     } finally {
       setConfidenceLoading(false);
-    }
-  };
-
-  // Regenerate Script based on which draft is selected
-  const handleRegenerate = async () => {
-    if (!activeDraft) return;
-
-    try {
-      setRegenerating(true);
-
-      if (selectedDraft === "openai") {
-        const response = await fetch(
-          "https://javlnpnawmfpypapauyc.supabase.co/functions/v1/swift-responder",
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              text: activeDraft.document_text,
-              strict: true,
-            }),
-          }
-        );
-
-        if (!response.ok) return alert("Regeneration failed.");
-
-        const data = await response.json();
-        if (!data.script) return alert("Regeneration failed — no script returned.");
-
-        await supabase
-          .from("draft_scripts")
-          .update({ script_text: data.script })
-          .eq("id", activeDraft.id)
-          .eq("user_id", user.id);
-
-        setActiveDraft((prev) => ({ ...prev, script_text: data.script }));
-        setDrafts((prev) =>
-          prev.map((d) =>
-            d.id === activeDraft.id ? { ...d, script_text: data.script } : d
-          )
-        );
-
-      } else if (selectedDraft === "claude") {
-        const { data: { session } } = await supabase.auth.getSession();
-        const token = session?.access_token;
-
-        const response = await fetch(
-          "https://javlnpnawmfpypapauyc.supabase.co/functions/v1/regenerate-claude",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${token}`,
-            },
-            body: JSON.stringify({
-              document_text: activeDraft.document_text,
-            }),
-          }
-        );
-
-        if (!response.ok) return alert("Claude regeneration failed.");
-
-        const data = await response.json();
-        const newClaudeScript = data.claude_script || "";
-        if (!newClaudeScript) return alert("Claude regeneration failed — no script returned.");
-
-        await supabase
-          .from("draft_scripts")
-          .update({ claude_script: newClaudeScript })
-          .eq("id", activeDraft.id)
-          .eq("user_id", user.id);
-
-        setActiveDraft((prev) => ({ ...prev, claude_script: newClaudeScript }));
-        setDrafts((prev) =>
-          prev.map((d) =>
-            d.id === activeDraft.id ? { ...d, claude_script: newClaudeScript } : d
-          )
-        );
-      }
-
-      setConfidenceResult(null);
-      setSelectedDraft(null);
-      alert("Script regenerated. Please run Check Confidence again.");
-
-    } catch (err) {
-      console.error("Regeneration error:", err);
-      alert("Regeneration failed.");
-    } finally {
-      setRegenerating(false);
     }
   };
 
@@ -680,10 +536,7 @@ function App() {
           <div className="card upload-section">
             <h3>Upload Checklist</h3>
             <input type="file" onChange={(e) => setFile(e.target.files[0])} />
-
-            <button className="primary-btn" onClick={generateScript}>
-              Generate Script
-            </button>
+            <button className="primary-btn" onClick={generateScript}>Generate Script</button>
           </div>
 
           <div className="draft-list">
@@ -694,10 +547,7 @@ function App() {
                 <p><strong>Script Status:</strong> {d.script_status}</p>
                 <p><strong>Checklist ID:</strong> {d.primitive_id}</p>
                 <p>{d.script_text}</p>
-                <button
-                  className="secondary-btn"
-                  onClick={() => toggleDraft(d)}
-                >
+                <button className="secondary-btn" onClick={() => toggleDraft(d)}>
                   {activeDraft?.id === d.id ? "Close Draft" : "Open Draft"}
                 </button>
               </div>
@@ -721,50 +571,28 @@ function App() {
                   {JSON.stringify(activeDraft.enhanced_primitive,
                     (key, value) => Array.isArray(value) ? value.join("\n - ") : value, 2)}
                 </pre>
-              </div>
 
-                {/* confidence check button */}
-                <button
-                  className="primary-btn"
-                  onClick={handleCheckConfidence}
-                  disabled={confidenceLoading}
-                >
+                <button className="primary-btn" onClick={handleCheckConfidence} disabled={confidenceLoading}>
                   {confidenceLoading ? "Checking Confidence..." : "Check Confidence"}
                 </button>
 
-                {/* confidence result display */}
                 {confidenceResult && (
                   <div className="card confidence-panel">
                     <h3>Confidence Result</h3>
-
                     <p><strong>Score:</strong> {confidenceResult.confidence_score}</p>
                     <p><strong>Decision:</strong> {confidenceResult.decision}</p>
                     <p><strong>Reason:</strong> {confidenceResult.reason}</p>
-
                     <h4>Matched Evidence</h4>
-                    <ul>
-                      {confidenceResult.matched_evidence?.map((item, i) => (
-                        <li key={i}>{item}</li>
-                      ))}
-                    </ul>
-
+                    <ul>{confidenceResult.matched_evidence?.map((item, i) => <li key={i}>{item}</li>)}</ul>
                     <h4>Missing Evidence</h4>
-                    <ul>
-                      {confidenceResult.missing_evidence?.map((item, i) => (
-                        <li key={i}>{item}</li>
-                      ))}
-                    </ul>
+                    <ul>{confidenceResult.missing_evidence?.map((item, i) => <li key={i}>{item}</li>)}</ul>
                   </div>
                 )}
               </div>
 
               {!activeDraft.chatStarted && (
-                <button
-                  className="primary-btn"
-                  onClick={() =>
-                    setActiveDraft((prev) => ({ ...prev, chatStarted: true }))
-                  }
-                >
+                <button className="primary-btn"
+                  onClick={() => setActiveDraft((prev) => ({ ...prev, chatStarted: true }))}>
                   Start Chat
                 </button>
               )}
@@ -779,10 +607,7 @@ function App() {
                     } else {
                       fetchApprovedScripts();
                     }
-
-                    setActiveDraft((prev) =>
-                      prev?.id === removeDraftId ? null : prev
-                    );
+                    setActiveDraft((prev) => prev?.id === removeDraftId ? null : prev);
                   }}
                 />
               )}
@@ -793,7 +618,6 @@ function App() {
             View Approved Scripts
           </button>
 
-          {/* Modal / Blanket */}
           {showApprovedModal && (
             <div className="approved-modal">
               <div className="modal-content">
@@ -817,5 +641,4 @@ function App() {
     </div>
   );
 }
-
 export default App;
