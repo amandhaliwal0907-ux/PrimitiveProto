@@ -1,28 +1,56 @@
-//Updated App.js, includes confidence checking 
-import { useState, useEffect } from "react";
+// Merged App.js
+// - Confidence checking (their code)
+// - Approved scripts modal (their code)
+// - Combined single-button video + audio generation with synced player
+
+import { useState, useEffect, useRef } from "react";
 import "./App.css";
 import Auth from "./Auth";
 import { supabase } from "./supabaseClient";
 import { extractFileText } from "./fileUtils";
 import ConversationAgent from "./ConversationAgent";
-import { fetchConfidence } from "./api"; // helper to call backend confidence API
+import { fetchConfidence } from "./api";
+import SyncedPlayer from "./SyncedPlayer";
+
+const SUPABASE_FUNCTIONS_URL = "https://javlnpnawmfpypapauyc.supabase.co/functions/v1";
+const POLL_INTERVAL_MS = 10_000;
+const MAX_POLL_ATTEMPTS = 30;
+
+const VOICE_OPTIONS = [
+  { value: "Mark",  label: "Mark" },
+  { value: "Maya",  label: "Maya" },
+  { value: "James", label: "James" },
+];
+
+const getAuthToken = async () => {
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token ?? "";
+};
 
 function App() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [file, setFile] = useState(null);
   const [drafts, setDrafts] = useState([]);
-  const [videoLoadingIds, setVideoLoadingIds] = useState([]);
   const [activeDraft, setActiveDraft] = useState(null);
   const [approvedScripts, setApprovedScripts] = useState([]);
   const [showApprovedModal, setShowApprovedModal] = useState(false);
-  const [voiceTranscript, setVoiceTranscript] = useState("");
 
-  // confidence state
+  // Confidence state
   const [confidenceResult, setConfidenceResult] = useState(null);
   const [confidenceLoading, setConfidenceLoading] = useState(false);
 
+  // Per-script generation state
+  // phase: "idle" | "generating" | "done" | "failed"
+  const [explainerStates, setExplainerStates] = useState({});
+  // Per-script voice selection
+  const [selectedVoices, setSelectedVoices] = useState({});
+
+  const pollTimers = useRef({});
+
+  // -------------------------------
   // Auth Session
+  // -------------------------------
   useEffect(() => {
     const fetchSession = async () => {
       const { data } = await supabase.auth.getSession();
@@ -30,284 +58,200 @@ function App() {
       setLoading(false);
     };
     fetchSession();
-
     const { data: listener } = supabase.auth.onAuthStateChange(
       (_event, session) => setUser(session?.user || null)
     );
-
     return () => listener.subscription.unsubscribe();
   }, []);
 
+  useEffect(() => {
+    return () => { Object.values(pollTimers.current).forEach(clearInterval); };
+  }, []);
+
+  // -------------------------------
   // Fetch Drafts
+  // -------------------------------
   const fetchDrafts = async (removeDraftId = null) => {
     if (!user) return;
     const { data, error } = await supabase
-      .from("draft_scripts")
-      .select("*")
-      .eq("primitive_status", "draft")
-      .eq("user_id", user.id)
+      .from("draft_scripts").select("*")
+      .eq("primitive_status", "draft").eq("user_id", user.id)
       .order("created_at", { ascending: false });
-
-    if (error) {
-      console.error("Error fetching drafts:", error);
-    } else {
-      let updatedDrafts = data || [];
-      if (removeDraftId) {
-        updatedDrafts = updatedDrafts.filter((d) => d.id !== removeDraftId);
-      }
-      setDrafts(updatedDrafts);
-    }
+    if (error) { console.error("Error fetching drafts:", error); return; }
+    let updatedDrafts = data || [];
+    if (removeDraftId) updatedDrafts = updatedDrafts.filter((d) => d.id !== removeDraftId);
+    setDrafts(updatedDrafts);
   };
 
-  useEffect(() => {
-    fetchDrafts();
-  }, [user]);
+  useEffect(() => { fetchDrafts(); }, [user]);
 
+  // -------------------------------
   // Fetch Approved Scripts
+  // -------------------------------
   const fetchApprovedScripts = async () => {
     if (!user) return;
     const { data, error } = await supabase
-      .from("primitives")
-      .select("*")
+      .from("primitives").select("*")
       .eq("user_id", user.id)
       .not("approved_script", "is", null)
       .neq("approved_script", "")
       .order("created_at", { ascending: false });
-
-    if (error) {
-      console.error("Error fetching approved scripts:", error);
-    } else {
-      console.log("Approved scripts from DB:", data);
-      setApprovedScripts(data || []);
-    }
+    if (error) { console.error("Error fetching approved scripts:", error); return; }
+    setApprovedScripts(data || []);
   };
 
-  useEffect(() => {
-    fetchApprovedScripts();
-  }, [user]);
+  useEffect(() => { fetchApprovedScripts(); }, [user]);
 
+  // Initialise explainer states from DB on load
+  useEffect(() => {
+    if (!approvedScripts.length) return;
+    setExplainerStates((prev) => {
+      const next = { ...prev };
+      approvedScripts.forEach((a) => {
+        if (!next[a.id]) {
+          const videoReady = a.video_status === "generated" && a.video_url;
+          const audioReady = a.audio_status === "generated" && a.audio_url;
+          const videoProcessing = a.video_status === "processing";
+          next[a.id] = {
+            phase: videoReady && audioReady ? "done"
+              : videoProcessing ? "polling"
+              : a.video_status === "failed" ? "failed"
+              : "idle",
+            videoProgress: videoReady ? 100 : 0,
+            videoReady: !!videoReady,
+            audioReady: !!audioReady,
+            error: null,
+          };
+        }
+      });
+      return next;
+    });
+  }, [approvedScripts]);
+
+  // Resume polling after page refresh
+  useEffect(() => {
+    approvedScripts.forEach((a) => {
+      const es = explainerStates[a.id];
+      if (es?.phase === "polling" && a.runway_task_id && !pollTimers.current[a.id]) {
+        pollVideo(a.id, a.runway_task_id);
+      }
+    });
+  }, [explainerStates, approvedScripts]);
+
+  // -------------------------------
   // Upload File
+  // -------------------------------
   const uploadFileToBucket = async () => {
     if (!file) return alert("Select a file first");
-
     const filePath = `uploads/${Date.now()}-${file.name}`;
     const { error: storageError } = await supabase.storage
-      .from("checklists")
-      .upload(filePath, file, { upsert: true });
-
+      .from("checklists").upload(filePath, file, { upsert: true });
     if (storageError) return alert(storageError.message);
-
     const { data: checklist, error: checklistError } = await supabase
       .from("checklists")
       .insert([{ file_name: file.name, file_url: filePath }])
-      .select()
-      .single();
-
+      .select().single();
     if (checklistError) return alert(checklistError.message);
-
     return checklist;
   };
 
-  // Generate Script + Primitive Draft
+  // -------------------------------
+  // Generate Script
+  // -------------------------------
   const generateScript = async () => {
     if (!file) return alert("Select checklist first");
-
     try {
       const checklist = await uploadFileToBucket();
       if (!checklist?.id) return alert("Checklist creation failed");
-
-      // original extracted file text
       const text = await extractFileText(file);
-
-      const response = await fetch(
-        "https://javlnpnawmfpypapauyc.supabase.co/functions/v1/swift-responder",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text }),
-        }
-      );
-
-      if (!response.ok) {
-        const errText = await response.text();
-        console.error("Edge function error:", errText);
-        return alert("Script generation failed (server error)");
-      }
-
+      const response = await fetch(`${SUPABASE_FUNCTIONS_URL}/swift-responder`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      if (!response.ok) return alert("Script generation failed (server error)");
       const data = await response.json();
       if (!data.script) return alert("Script generation failed (no script returned)");
-
-      const primitiveDraftToSave = data.primitive || {};
-
       const { data: newDraftArray, error: draftError } = await supabase
         .from("draft_scripts")
-        .insert([
-          {
-            user_id: user.id,
-            primitive_id: checklist.id,
-            script_text: data.script, // AI generated script
-            primitive_draft: primitiveDraftToSave,
-            document_text: text, // original extracted document text
-            primitive_status: "draft",
-            script_status: "draft",
-            workflow_state: "primitive_clarification",
-          },
-        ])
-        .select();
-
+        .insert([{
+          user_id: user.id,
+          primitive_id: checklist.id,
+          script_text: data.script,
+          primitive_draft: data.primitive || {},
+          document_text: text,
+          primitive_status: "draft",
+          script_status: "draft",
+          workflow_state: "primitive_clarification",
+        }]).select();
       if (draftError) return alert("Failed to save draft: " + draftError.message);
-
-      const newDraft = newDraftArray?.[0];
-      if (!newDraft) return alert("Draft creation failed");
-
+      if (!newDraftArray?.[0]) return alert("Draft creation failed");
       await fetchDrafts();
-
       setFile(null);
       alert("Script and primitive draft generated successfully.");
     } catch (err) {
       console.error("Error generating script:", err);
-      alert("Error generating script. See console for details.");
+      alert("Error generating script.");
     }
   };
 
+  // -------------------------------
   // Toggle Draft + Enhance Primitive
+  // -------------------------------
   const toggleDraft = async (draft) => {
     if (activeDraft?.id === draft.id) {
       setActiveDraft(null);
-      setConfidenceResult(null); // clear previous confidence result when closing
+      setConfidenceResult(null);
       return;
     }
-
     const { data: latestDraft, error } = await supabase
-      .from("draft_scripts")
-      .select("*")
-      .eq("id", draft.id)
-      .eq("user_id", user.id)
-      .single();
-
-    if (error || !latestDraft) {
-      console.error("Draft not found or unauthorized:", error);
-      return;
-    }
-
-    // reset confidence when switching drafts
+      .from("draft_scripts").select("*")
+      .eq("id", draft.id).eq("user_id", user.id).single();
+    if (error || !latestDraft) { console.error("Draft not found:", error); return; }
     setConfidenceResult(null);
-
     setActiveDraft({ ...latestDraft, enhanced_primitive: null });
 
-    const isPrimitiveEmpty = (primitiveObj) =>
-      !primitiveObj ||
-      !Object.values(primitiveObj).some((v) =>
-        Array.isArray(v) ? v.length > 0 : !!v
-      );
+    const isPrimitiveEmpty = (obj) =>
+      !obj || !Object.values(obj).some((v) => Array.isArray(v) ? v.length > 0 : !!v);
 
     if (isPrimitiveEmpty(latestDraft.enhanced_primitive)) {
       try {
-        setActiveDraft((prev) => (prev ? { ...prev, enhancing: true } : prev));
-
-        const res = await fetch(
-          "https://javlnpnawmfpypapauyc.supabase.co/functions/v1/swift-responder",
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ primitive: latestDraft.primitive_draft }),
-          }
-        );
-
-        if (!res.ok) {
-          const errText = await res.text();
-          console.error("Smooth-Action Error:", errText);
-          setActiveDraft((prev) => (prev ? { ...prev, enhancing: false } : prev));
-          return;
-        }
-
+        setActiveDraft((prev) => prev ? { ...prev, enhancing: true } : prev);
+        const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/swift-responder`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ primitive: latestDraft.primitive_draft }),
+        });
+        if (!res.ok) { setActiveDraft((prev) => prev ? { ...prev, enhancing: false } : prev); return; }
         const data = await res.json();
         const enhancedPrimitive = data.primitive || {};
-
-        const { error: updateError } = await supabase
-          .from("draft_scripts")
-          .update({ enhanced_primitive: enhancedPrimitive })
-          .eq("id", draft.id)
-          .eq("user_id", user.id);
-
-        if (updateError) {
-          console.error("Error saving enhanced primitive:", updateError);
-        }
-
-        setDrafts((prev) =>
-          prev.map((d) =>
-            d.id === draft.id ? { ...d, enhanced_primitive: enhancedPrimitive } : d
-          )
-        );
-
-        setActiveDraft((prev) =>
-          prev
-            ? {
-                ...prev,
-                enhanced_primitive: enhancedPrimitive,
-                enhancing: false,
-              }
-            : prev
-        );
+        await supabase.from("draft_scripts").update({ enhanced_primitive: enhancedPrimitive })
+          .eq("id", draft.id).eq("user_id", user.id);
+        setDrafts((prev) => prev.map((d) => d.id === draft.id ? { ...d, enhanced_primitive: enhancedPrimitive } : d));
+        setActiveDraft((prev) => prev ? { ...prev, enhanced_primitive: enhancedPrimitive, enhancing: false } : prev);
       } catch (err) {
-        console.error("Error calling smooth-action:", err);
-        setActiveDraft((prev) => (prev ? { ...prev, enhancing: false } : prev));
+        console.error("Error enhancing primitive:", err);
+        setActiveDraft((prev) => prev ? { ...prev, enhancing: false } : prev);
       }
     } else {
       setActiveDraft(latestDraft);
     }
   };
 
-  // Confidence check on generated draft
+  // -------------------------------
+  // Confidence Check
+  // -------------------------------
   const handleCheckConfidence = async () => {
-    if (!activeDraft) {
-      alert("No active draft selected.");
-      return;
-    }
-
-    // use enhanced primitive first, fallback to primitive draft
-    const primitive =
-      activeDraft.enhanced_primitive ||
-      activeDraft.primitive_draft ||
-      {};
-
-    const primitiveText =
-      typeof primitive === "string"
-        ? primitive
-        : JSON.stringify(primitive, null, 2);
-
-    // try common field names in case structure varies
-    const who = primitive.who || primitive.actor || "";
-    const what = primitive.what || primitive.action || "";
-    const where = primitive.where || primitive.location || "";
-    const precondition =
-      primitive.precondition || primitive.condition || "";
-
+    if (!activeDraft) { alert("No active draft selected."); return; }
     const documentText = activeDraft.document_text || "";
-
-    if (!documentText) {
-      alert("Document text is missing for this draft.");
-      return;
-    }
-
+    if (!documentText) { alert("Document text is missing for this draft."); return; }
     try {
       setConfidenceLoading(true);
       setConfidenceResult(null);
-
       const result = await fetchConfidence({
-        // primitive_id: activeDraft.id,
-  //primitive_text: primitiveText,
-  //who,
-  //what,
-  //where,
- // precondition,
- // document_text: documentText,
-
- //changes made here based on cluade
         script_text: activeDraft.script_text,
         document_text: documentText,
       });
-
       setConfidenceResult(result);
     } catch (error) {
       console.error("Confidence check failed:", error);
@@ -317,33 +261,223 @@ function App() {
     }
   };
 
+  // -------------------------------
+  // Generate Explainer (video + audio together)
+  // -------------------------------
+  const generateExplainer = async (approved) => {
+    const scriptId = approved.id;
+    const presetId = selectedVoices[scriptId] || VOICE_OPTIONS[0].value;
+
+    setExplainerStates((prev) => ({
+      ...prev,
+      [scriptId]: { phase: "generating", videoProgress: 0, videoReady: false, audioReady: false, error: null },
+    }));
+
+    try {
+      const token = await getAuthToken();
+
+      // Kick off video and audio in parallel
+      const [videoRes, audioRes] = await Promise.all([
+        fetch(`${SUPABASE_FUNCTIONS_URL}/generate-video`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+          body: JSON.stringify({ approvedScript: approved.approved_script, approvedScriptId: scriptId }),
+        }),
+        fetch(`${SUPABASE_FUNCTIONS_URL}/generate-audio`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+          body: JSON.stringify({ approvedScript: approved.approved_script, approvedScriptId: scriptId, presetId }),
+        }),
+      ]);
+
+      if (!videoRes.ok) throw new Error("Failed to start video generation");
+      if (!audioRes.ok) throw new Error("Failed to start audio generation");
+
+      const { taskId } = await videoRes.json();
+      const { audioUrl } = await audioRes.json();
+
+      if (!taskId) throw new Error("No video task ID returned");
+
+      // Audio is done (polls server-side), mark it ready
+      // Video needs client-side polling
+      setExplainerStates((prev) => ({
+        ...prev,
+        [scriptId]: {
+          phase: "polling",
+          videoProgress: 5,
+          videoReady: false,
+          audioReady: !!audioUrl,
+          error: null,
+        },
+      }));
+
+      pollVideo(scriptId, taskId);
+    } catch (err) {
+      console.error("Explainer generation error:", err);
+      setExplainerStates((prev) => ({
+        ...prev,
+        [scriptId]: { phase: "failed", videoProgress: 0, videoReady: false, audioReady: false, error: err.message },
+      }));
+    }
+  };
+
+  const pollVideo = (scriptId, taskId) => {
+    if (pollTimers.current[scriptId]) return;
+    let attempts = 0;
+    const poll = async () => {
+      attempts++;
+      if (attempts > MAX_POLL_ATTEMPTS) {
+        stopPolling(scriptId);
+        setExplainerStates((prev) => ({
+          ...prev,
+          [scriptId]: { ...prev[scriptId], phase: "failed", error: "Video generation timed out." },
+        }));
+        return;
+      }
+      try {
+        const token = await getAuthToken();
+        const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/poll-video-status`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+          body: JSON.stringify({ taskId, approvedScriptId: scriptId }),
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        const progress = Math.round((data.progress ?? 0) * 100);
+
+        if (data.status === "SUCCEEDED") {
+          stopPolling(scriptId);
+          setExplainerStates((prev) => ({
+            ...prev,
+            [scriptId]: { ...prev[scriptId], phase: "done", videoProgress: 100, videoReady: true },
+          }));
+          await fetchApprovedScripts();
+          return;
+        }
+        if (data.status === "FAILED" || data.status === "CANCELLED") {
+          stopPolling(scriptId);
+          setExplainerStates((prev) => ({
+            ...prev,
+            [scriptId]: { ...prev[scriptId], phase: "failed", error: data.error || "Video generation failed." },
+          }));
+          return;
+        }
+        setExplainerStates((prev) => ({
+          ...prev,
+          [scriptId]: { ...prev[scriptId], videoProgress: Math.max(5, progress) },
+        }));
+      } catch (err) { console.error("Polling error:", err); }
+    };
+    poll();
+    pollTimers.current[scriptId] = setInterval(poll, POLL_INTERVAL_MS);
+  };
+
+  const stopPolling = (scriptId) => {
+    if (pollTimers.current[scriptId]) {
+      clearInterval(pollTimers.current[scriptId]);
+      delete pollTimers.current[scriptId];
+    }
+  };
+
+  // -------------------------------
+  // Render Media Section
+  // -------------------------------
+  const renderMediaSection = (approved) => {
+    const es = explainerStates[approved.id] || { phase: "idle", videoProgress: 0, videoReady: false, audioReady: false, error: null };
+    const presetId = selectedVoices[approved.id] || VOICE_OPTIONS[0].value;
+    const isGenerating = es.phase === "generating" || es.phase === "polling";
+    const isDone = es.phase === "done" && approved.video_url && approved.audio_url;
+
+    return (
+      <div className="media-section">
+
+        {/* Synced player once both are ready */}
+        {isDone && (
+          <div className="synced-player-wrapper">
+            <h4 className="explainer-title">📽 Explainer Video</h4>
+            <SyncedPlayer videoUrl={approved.video_url} audioUrl={approved.audio_url} />
+            <div className="download-links">
+              <a className="download-link-btn" href={approved.video_url} target="_blank" rel="noopener noreferrer" download>⬇ Download Video</a>
+              <a className="download-link-btn secondary" href={approved.audio_url} target="_blank" rel="noopener noreferrer" download>⬇ Download Audio</a>
+            </div>
+          </div>
+        )}
+
+        {/* Progress indicator while generating */}
+        {isGenerating && (
+          <div className="video-progress-wrapper">
+            <div className="video-progress-label">
+              {es.phase === "generating"
+                ? "Starting generation…"
+                : `Generating video… ${es.videoProgress}%${es.audioReady ? " · ✓ Audio ready" : " · Generating audio…"}`}
+            </div>
+            <div className="video-progress-track">
+              <div className="video-progress-bar" style={{ width: `${es.videoProgress}%` }} />
+            </div>
+            <p className="video-progress-hint">Video and audio are being generated. Please wait...</p>
+          </div>
+        )}
+
+        {/* Error state */}
+        {es.phase === "failed" && (
+          <div className="video-error">
+            <span>⚠ {es.error || "Generation failed."}</span>
+            <button className="secondary-btn retry-btn"
+              onClick={() => setExplainerStates((prev) => ({
+                ...prev,
+                [approved.id]: { phase: "idle", videoProgress: 0, videoReady: false, audioReady: false, error: null },
+              }))}>
+              Retry
+            </button>
+          </div>
+        )}
+
+        {/* Single generate button + voice selector */}
+        {!isDone && !isGenerating && (
+          <div className="explainer-generate-row">
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+              <span style={{ fontSize: "13px", marginBottom: "2px" }}>Choose a voice:</span>
+              <select
+                className="voice-select"
+                value={presetId}
+                onChange={(e) => setSelectedVoices((prev) => ({ ...prev, [approved.id]: e.target.value }))}
+              >
+                {VOICE_OPTIONS.map((v) => (
+                  <option key={v.value} value={v.value}>{v.label}</option>
+                ))}
+              </select>
+            </div>
+            <button
+              className="primary-btn"
+              disabled={!approved.approved_script}
+              onClick={() => generateExplainer(approved)}
+            >
+               Generate Explainer
+            </button>
+          </div>
+        )}
+
+      </div>
+    );
+  };
+
+  // -------------------------------
   // ApprovedScriptCard Component
+  // -------------------------------
   function ApprovedScriptCard({ script, user }) {
     const [showHistory, setShowHistory] = useState(false);
     const [history, setHistory] = useState(null);
 
     const fetchHistory = async () => {
       if (history) return setShowHistory((prev) => !prev);
-
       try {
         const { data: draftData } = await supabase
-          .from("draft_scripts")
-          .select("primitive_draft, enhanced_primitive")
-          .eq("user_id", user.id)
-          .eq("primitive_id", script.script_id)
-          .maybeSingle();
-
+          .from("draft_scripts").select("primitive_draft, enhanced_primitive")
+          .eq("user_id", user.id).eq("primitive_id", script.script_id).maybeSingle();
         const { data: primData } = await supabase
-          .from("primitives")
-          .select("final_script, approved_script")
-          .eq("user_id", user.id)
-          .eq("script_id", script.script_id)
-          .maybeSingle();
-
-        setHistory({
-          draft: draftData || {},
-          primitive: primData || {},
-        });
+          .from("primitives").select("final_script, approved_script")
+          .eq("user_id", user.id).eq("script_id", script.script_id).maybeSingle();
+        setHistory({ draft: draftData || {}, primitive: primData || {} });
         setShowHistory(true);
       } catch (err) {
         console.error("Error fetching history:", err);
@@ -369,7 +503,6 @@ function App() {
               <strong>Enhanced Primitive:</strong>
               <pre>{JSON.stringify(history.draft.enhanced_primitive, null, 2)}</pre>
             </div>
-
             <h5>Primitives Table</h5>
             <div className="card">
               <strong>Final Script:</strong>
@@ -379,42 +512,33 @@ function App() {
             </div>
           </div>
         )}
+
+        {renderMediaSection(script)}
       </div>
     );
   }
 
+  // -------------------------------
   // Rendering
+  // -------------------------------
   if (loading) return <div>Loading...</div>;
   if (!user) return <Auth setUser={setUser} />;
 
   return (
     <div className="dashboard-container">
-      {/* Sticky Top Header */}
       <div className="top-header sticky-header">
         <h3>Welcome, {user.email}</h3>
-        <button
-          className="secondary-btn"
-          onClick={() => supabase.auth.signOut()}
-        >
-          Logout
-        </button>
+        <button className="secondary-btn" onClick={() => supabase.auth.signOut()}>Logout</button>
       </div>
 
-      {/* Main Dashboard */}
       <div className="dashboard">
-        {/* Left Panel */}
         <div className="left-panel">
-          {/* Upload Section */}
           <div className="card upload-section">
             <h3>Upload Checklist</h3>
             <input type="file" onChange={(e) => setFile(e.target.files[0])} />
-
-            <button className="primary-btn" onClick={generateScript}>
-              Generate Script
-            </button>
+            <button className="primary-btn" onClick={generateScript}>Generate Script</button>
           </div>
 
-          {/* Draft List */}
           <div className="draft-list">
             <h3>Your Drafts</h3>
             {drafts.length === 0 && <p>No drafts yet.</p>}
@@ -423,10 +547,7 @@ function App() {
                 <p><strong>Script Status:</strong> {d.script_status}</p>
                 <p><strong>Checklist ID:</strong> {d.primitive_id}</p>
                 <p>{d.script_text}</p>
-                <button
-                  className="secondary-btn"
-                  onClick={() => toggleDraft(d)}
-                >
+                <button className="secondary-btn" onClick={() => toggleDraft(d)}>
                   {activeDraft?.id === d.id ? "Close Draft" : "Open Draft"}
                 </button>
               </div>
@@ -434,9 +555,7 @@ function App() {
           </div>
         </div>
 
-        {/* Right Panel */}
         <div className="right-panel">
-          {/* Active Draft Panel */}
           {activeDraft && (
             <div className="active-draft-panel">
               <h4>Checklist/Primitive ID: {activeDraft.primitive_id}</h4>
@@ -449,58 +568,31 @@ function App() {
               <div className="card enhanced-panel">
                 <h3>Enhanced Primitive</h3>
                 <pre>
-                  {JSON.stringify(
-                    activeDraft.enhanced_primitive,
-                    (key, value) => {
-                      if (Array.isArray(value)) return value.join("\n - ");
-                      return value;
-                    },
-                    2
-                  )}
+                  {JSON.stringify(activeDraft.enhanced_primitive,
+                    (key, value) => Array.isArray(value) ? value.join("\n - ") : value, 2)}
                 </pre>
 
-                {/* confidence check button */}
-                <button
-                  className="primary-btn"
-                  onClick={handleCheckConfidence}
-                  disabled={confidenceLoading}
-                >
+                <button className="primary-btn" onClick={handleCheckConfidence} disabled={confidenceLoading}>
                   {confidenceLoading ? "Checking Confidence..." : "Check Confidence"}
                 </button>
 
-                {/* confidence result display */}
                 {confidenceResult && (
                   <div className="card confidence-panel">
                     <h3>Confidence Result</h3>
-
                     <p><strong>Score:</strong> {confidenceResult.confidence_score}</p>
                     <p><strong>Decision:</strong> {confidenceResult.decision}</p>
                     <p><strong>Reason:</strong> {confidenceResult.reason}</p>
-
                     <h4>Matched Evidence</h4>
-                    <ul>
-                      {confidenceResult.matched_evidence?.map((item, i) => (
-                        <li key={i}>{item}</li>
-                      ))}
-                    </ul>
-
+                    <ul>{confidenceResult.matched_evidence?.map((item, i) => <li key={i}>{item}</li>)}</ul>
                     <h4>Missing Evidence</h4>
-                    <ul>
-                      {confidenceResult.missing_evidence?.map((item, i) => (
-                        <li key={i}>{item}</li>
-                      ))}
-                    </ul>
+                    <ul>{confidenceResult.missing_evidence?.map((item, i) => <li key={i}>{item}</li>)}</ul>
                   </div>
                 )}
               </div>
 
               {!activeDraft.chatStarted && (
-                <button
-                  className="primary-btn"
-                  onClick={() =>
-                    setActiveDraft((prev) => ({ ...prev, chatStarted: true }))
-                  }
-                >
+                <button className="primary-btn"
+                  onClick={() => setActiveDraft((prev) => ({ ...prev, chatStarted: true }))}>
                   Start Chat
                 </button>
               )}
@@ -510,42 +602,28 @@ function App() {
                   draft={activeDraft}
                   refresh={(removeDraftId, newApprovedScript = null) => {
                     fetchDrafts(removeDraftId);
-
                     if (newApprovedScript) {
                       setApprovedScripts((prev) => [newApprovedScript, ...prev]);
                     } else {
                       fetchApprovedScripts();
                     }
-
-                    setActiveDraft((prev) =>
-                      prev?.id === removeDraftId ? null : prev
-                    );
+                    setActiveDraft((prev) => prev?.id === removeDraftId ? null : prev);
                   }}
                 />
               )}
             </div>
           )}
 
-          {/* Approved Scripts */}
-          <button
-            className="view-btn"
-            onClick={() => setShowApprovedModal(true)}
-          >
+          <button className="view-btn" onClick={() => setShowApprovedModal(true)}>
             View Approved Scripts
           </button>
 
-          {/* Modal / Blanket */}
           {showApprovedModal && (
             <div className="approved-modal">
               <div className="modal-content">
                 <div className="modal-header">
                   <h3>Approved Scripts</h3>
-                  <button
-                    className="close-btn"
-                    onClick={() => setShowApprovedModal(false)}
-                  >
-                    Close
-                  </button>
+                  <button className="close-btn" onClick={() => setShowApprovedModal(false)}>Close</button>
                 </div>
                 <div className="modal-body">
                   <div className="approved-scripts-list">
