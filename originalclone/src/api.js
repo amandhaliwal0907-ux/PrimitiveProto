@@ -13,17 +13,14 @@ export async function fetchConfidence(data) {
         "Authorization": `Bearer ${token}`,
       },
       body: JSON.stringify({
-        script_text: data.script_text,
+        openai_script: data.openai_script,
+        claude_script: data.claude_script,
         document_text: data.document_text,
       }),
     }
   );
 
   const result = await response.json();
-
-  if (!response.ok) {
-    throw new Error(result.error || "Confidence request failed");
-  }
-
+  if (!response.ok) throw new Error(result.error || "Confidence request failed");
   return result;
 }
