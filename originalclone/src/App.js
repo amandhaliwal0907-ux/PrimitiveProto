@@ -1,5 +1,5 @@
 // Merged App.js
-// - Confidence checking (their code)
+// - Confidence checking removed from enhanced primitive panel, cross confidence check instead
 // - Approved scripts modal (their code)
 // - Combined single-button video + audio generation with synced player
 
@@ -9,7 +9,6 @@ import Auth from "./Auth";
 import { supabase } from "./supabaseClient";
 import { extractFileText } from "./fileUtils";
 import ConversationAgent from "./ConversationAgent";
-import { fetchConfidence } from "./api";
 import SyncedPlayer from "./SyncedPlayer";
 
 const SUPABASE_FUNCTIONS_URL = "https://javlnpnawmfpypapauyc.supabase.co/functions/v1";
@@ -36,21 +35,14 @@ function App() {
   const [approvedScripts, setApprovedScripts] = useState([]);
   const [showApprovedModal, setShowApprovedModal] = useState(false);
 
-  // Confidence state
-  const [confidenceResult, setConfidenceResult] = useState(null);
-  const [confidenceLoading, setConfidenceLoading] = useState(false);
-
   // Per-script generation state
-  // phase: "idle" | "generating" | "done" | "failed"
   const [explainerStates, setExplainerStates] = useState({});
   // Per-script voice selection
   const [selectedVoices, setSelectedVoices] = useState({});
 
   const pollTimers = useRef({});
 
-  // -------------------------------
   // Auth Session
-  // -------------------------------
   useEffect(() => {
     const fetchSession = async () => {
       const { data } = await supabase.auth.getSession();
@@ -68,9 +60,7 @@ function App() {
     return () => { Object.values(pollTimers.current).forEach(clearInterval); };
   }, []);
 
-  // -------------------------------
   // Fetch Drafts
-  // -------------------------------
   const fetchDrafts = async (removeDraftId = null) => {
     if (!user) return;
     const { data, error } = await supabase
@@ -85,9 +75,7 @@ function App() {
 
   useEffect(() => { fetchDrafts(); }, [user]);
 
-  // -------------------------------
   // Fetch Approved Scripts
-  // -------------------------------
   const fetchApprovedScripts = async () => {
     if (!user) return;
     const { data, error } = await supabase
@@ -138,9 +126,7 @@ function App() {
     });
   }, [explainerStates, approvedScripts]);
 
-  // -------------------------------
   // Upload File
-  // -------------------------------
   const uploadFileToBucket = async () => {
     if (!file) return alert("Select a file first");
     const filePath = `uploads/${Date.now()}-${file.name}`;
@@ -155,9 +141,7 @@ function App() {
     return checklist;
   };
 
-  // -------------------------------
   // Generate Script
-  // -------------------------------
   const generateScript = async () => {
     if (!file) return alert("Select checklist first");
     try {
@@ -195,20 +179,16 @@ function App() {
     }
   };
 
-  // -------------------------------
   // Toggle Draft + Enhance Primitive
-  // -------------------------------
   const toggleDraft = async (draft) => {
     if (activeDraft?.id === draft.id) {
       setActiveDraft(null);
-      setConfidenceResult(null);
       return;
     }
     const { data: latestDraft, error } = await supabase
       .from("draft_scripts").select("*")
       .eq("id", draft.id).eq("user_id", user.id).single();
     if (error || !latestDraft) { console.error("Draft not found:", error); return; }
-    setConfidenceResult(null);
     setActiveDraft({ ...latestDraft, enhanced_primitive: null });
 
     const isPrimitiveEmpty = (obj) =>
@@ -238,32 +218,7 @@ function App() {
     }
   };
 
-  // -------------------------------
-  // Confidence Check
-  // -------------------------------
-  const handleCheckConfidence = async () => {
-    if (!activeDraft) { alert("No active draft selected."); return; }
-    const documentText = activeDraft.document_text || "";
-    if (!documentText) { alert("Document text is missing for this draft."); return; }
-    try {
-      setConfidenceLoading(true);
-      setConfidenceResult(null);
-      const result = await fetchConfidence({
-        script_text: activeDraft.script_text,
-        document_text: documentText,
-      });
-      setConfidenceResult(result);
-    } catch (error) {
-      console.error("Confidence check failed:", error);
-      alert("Confidence check failed.");
-    } finally {
-      setConfidenceLoading(false);
-    }
-  };
-
-  // -------------------------------
   // Generate Explainer (video + audio together)
-  // -------------------------------
   const generateExplainer = async (approved) => {
     const scriptId = approved.id;
     const presetId = selectedVoices[scriptId] || VOICE_OPTIONS[0].value;
@@ -276,7 +231,6 @@ function App() {
     try {
       const token = await getAuthToken();
 
-      // Kick off video and audio in parallel
       const [videoRes, audioRes] = await Promise.all([
         fetch(`${SUPABASE_FUNCTIONS_URL}/generate-video`, {
           method: "POST",
@@ -298,8 +252,6 @@ function App() {
 
       if (!taskId) throw new Error("No video task ID returned");
 
-      // Audio is done (polls server-side), mark it ready
-      // Video needs client-side polling
       setExplainerStates((prev) => ({
         ...prev,
         [scriptId]: {
@@ -379,9 +331,7 @@ function App() {
     }
   };
 
-  // -------------------------------
   // Render Media Section
-  // -------------------------------
   const renderMediaSection = (approved) => {
     const es = explainerStates[approved.id] || { phase: "idle", videoProgress: 0, videoReady: false, audioReady: false, error: null };
     const presetId = selectedVoices[approved.id] || VOICE_OPTIONS[0].value;
@@ -390,8 +340,6 @@ function App() {
 
     return (
       <div className="media-section">
-
-        {/* Synced player once both are ready */}
         {isDone && (
           <div className="synced-player-wrapper">
             <h4 className="explainer-title">📽 Explainer Video</h4>
@@ -403,7 +351,6 @@ function App() {
           </div>
         )}
 
-        {/* Progress indicator while generating */}
         {isGenerating && (
           <div className="video-progress-wrapper">
             <div className="video-progress-label">
@@ -418,7 +365,6 @@ function App() {
           </div>
         )}
 
-        {/* Error state */}
         {es.phase === "failed" && (
           <div className="video-error">
             <span>⚠ {es.error || "Generation failed."}</span>
@@ -432,7 +378,6 @@ function App() {
           </div>
         )}
 
-        {/* Single generate button + voice selector */}
         {!isDone && !isGenerating && (
           <div className="explainer-generate-row">
             <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
@@ -456,14 +401,11 @@ function App() {
             </button>
           </div>
         )}
-
       </div>
     );
   };
 
-  // -------------------------------
-  // ApprovedScriptCard Component
-  // -------------------------------
+  // ApprovedScriptCard Component inside the view history button in the view approved scripts button
   function ApprovedScriptCard({ script, user }) {
     const [showHistory, setShowHistory] = useState(false);
     const [history, setHistory] = useState(null);
@@ -475,7 +417,7 @@ function App() {
           .from("draft_scripts").select("primitive_draft, enhanced_primitive")
           .eq("user_id", user.id).eq("primitive_id", script.script_id).maybeSingle();
         const { data: primData } = await supabase
-          .from("primitives").select("final_script, approved_script")
+          .from("primitives").select("openai_script, claude_script, approved_script") //new table column added in the primitive table 
           .eq("user_id", user.id).eq("script_id", script.script_id).maybeSingle();
         setHistory({ draft: draftData || {}, primitive: primData || {} });
         setShowHistory(true);
@@ -493,9 +435,8 @@ function App() {
         <button className="primary-btn" onClick={fetchHistory}>
           {showHistory ? "Hide History" : "View History"}
         </button>
-
         {showHistory && history && (
-          <div className="history-panel">
+          <div className="history-panel"> 
             <h5>Draft Scripts</h5>
             <div className="card">
               <strong>Primitive Draft:</strong>
@@ -505,8 +446,10 @@ function App() {
             </div>
             <h5>Primitives Table</h5>
             <div className="card">
-              <strong>Final Script:</strong>
-              <pre>{history.primitive.final_script}</pre>
+              <strong>OpenAI Script:</strong> 
+              <pre>{history.primitive.openai_script}</pre>
+              <strong>Claude Script:</strong>
+              <pre>{history.primitive.claude_script}</pre>
               <strong>Approved Script:</strong>
               <pre>{history.primitive.approved_script}</pre>
             </div>
@@ -518,9 +461,7 @@ function App() {
     );
   }
 
-  // -------------------------------
   // Rendering
-  // -------------------------------
   if (loading) return <div>Loading...</div>;
   if (!user) return <Auth setUser={setUser} />;
 
@@ -571,23 +512,6 @@ function App() {
                   {JSON.stringify(activeDraft.enhanced_primitive,
                     (key, value) => Array.isArray(value) ? value.join("\n - ") : value, 2)}
                 </pre>
-
-                <button className="primary-btn" onClick={handleCheckConfidence} disabled={confidenceLoading}>
-                  {confidenceLoading ? "Checking Confidence..." : "Check Confidence"}
-                </button>
-
-                {confidenceResult && (
-                  <div className="card confidence-panel">
-                    <h3>Confidence Result</h3>
-                    <p><strong>Score:</strong> {confidenceResult.confidence_score}</p>
-                    <p><strong>Decision:</strong> {confidenceResult.decision}</p>
-                    <p><strong>Reason:</strong> {confidenceResult.reason}</p>
-                    <h4>Matched Evidence</h4>
-                    <ul>{confidenceResult.matched_evidence?.map((item, i) => <li key={i}>{item}</li>)}</ul>
-                    <h4>Missing Evidence</h4>
-                    <ul>{confidenceResult.missing_evidence?.map((item, i) => <li key={i}>{item}</li>)}</ul>
-                  </div>
-                )}
               </div>
 
               {!activeDraft.chatStarted && (
@@ -641,4 +565,5 @@ function App() {
     </div>
   );
 }
+
 export default App;
