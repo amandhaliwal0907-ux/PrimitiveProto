@@ -1,15 +1,15 @@
 {
   "files": {
     "main.css": "/PrimitiveProto/static/css/main.68563639.css",
-    "main.js": "/PrimitiveProto/static/js/main.67020f68.js",
+    "main.js": "/PrimitiveProto/static/js/main.00196b53.js",
     "static/js/453.0621080e.chunk.js": "/PrimitiveProto/static/js/453.0621080e.chunk.js",
     "index.html": "/PrimitiveProto/index.html",
     "main.68563639.css.map": "/PrimitiveProto/static/css/main.68563639.css.map",
-    "main.67020f68.js.map": "/PrimitiveProto/static/js/main.67020f68.js.map",
+    "main.00196b53.js.map": "/PrimitiveProto/static/js/main.00196b53.js.map",
     "453.0621080e.chunk.js.map": "/PrimitiveProto/static/js/453.0621080e.chunk.js.map"
   },
   "entrypoints": [
     "static/css/main.68563639.css",
-    "static/js/main.67020f68.js"
+    "static/js/main.00196b53.js"
   ]
 }
