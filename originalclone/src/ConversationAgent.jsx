@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "./supabaseClient";
+import Tooltip from "./Tooltip";
 
 const SUPABASE_FUNCTIONS_URL = "https://javlnpnawmfpypapauyc.supabase.co/functions/v1";
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -427,23 +428,29 @@ export default function ConversationAgent({ draft, refresh }) {
         )}
 
         <div className="action-buttons">
-          <button className="primary-btn" onClick={handleRunStressTest} disabled={simLoading}>
-            {simLoading ? "Running 1,000 Iterations..." : "Run Reliability Simulation"}
-          </button>
-          <button className="primary-btn approve-btn" onClick={handleApprove} disabled={approving || simLoading}>
-            {approving ? "Approved" : "Approve"}
-          </button>
+          <Tooltip text="Test your process with 1,000 simulations to estimate failure probability">
+            <button className="primary-btn" onClick={handleRunStressTest} disabled={simLoading}>
+              {simLoading ? "Running 1,000 Iterations..." : "Run Reliability Simulation"}
+            </button>
+          </Tooltip>
+          <Tooltip text="Finalize this process and prepare for video generation">
+            <button className="primary-btn approve-btn" onClick={handleApprove} disabled={approving || simLoading}>
+              {approving ? "Approved" : "Approve"}
+            </button>
+          </Tooltip>
         </div>
       </div>
 
       {/* Voice recording button */}
-      <button
-        className="primary-btn"
-        onClick={startRecording}
-        style={{ backgroundColor: listening ? "red" : "#eee", marginBottom: "8px" }}
-      >
-        {listening ? "Listening..." : "Start Recording"}
-      </button>
+      <Tooltip text="Record audio instructions to modify your process">
+        <button
+          className="primary-btn"
+          onClick={startRecording}
+          style={{ backgroundColor: listening ? "red" : "#eee", marginBottom: "8px" }}
+        >
+          {listening ? "Listening..." : "Start Recording"}
+        </button>
+      </Tooltip>
 
       {/* Text input for user instructions */}
       <textarea
@@ -459,9 +466,11 @@ export default function ConversationAgent({ draft, refresh }) {
       {/* Show Regenerate Script button after primitive is approved
           Hidden once scripts are generated (openaiRegenScript is no longer null) */}
       {showRegenerateButton && openaiRegenScript === null && !regenLoading && (
-        <button className="primary-btn" style={{ marginTop: "16px" }} onClick={handleRegenerateScript}>
-          Regenerate Script
-        </button>
+        <Tooltip text="Generate two script versions using your approved process for comparison">
+          <button className="primary-btn" style={{ marginTop: "16px" }} onClick={handleRegenerateScript}>
+            Regenerate Script
+          </button>
+        </Tooltip>
       )}
 
       {/* Loading indicator while both scripts are being generated */}
@@ -564,14 +573,18 @@ export default function ConversationAgent({ draft, refresh }) {
           {/* Approve saves this script to approved_script column in primitives
           Discard removes it from UI only still saved in openai_script column, should we remove from db too?? */}
                 <div style={{ display: "flex", gap: "8px" }}>
-                  <button className="primary-btn" style={{ flex: 1 }}
-                    onClick={() => handleApproveRegenScript(openaiRegenScript, "claude")}>
-                    Approve
-                  </button>
-                  <button className="secondary-btn" style={{ flex: 1 }}
-                    onClick={() => handleDiscardRegenScript("openai")}>
-                    Discard
-                  </button>
+                  <Tooltip text="Use this script for your final process">
+                    <button className="primary-btn" style={{ flex: 1 }}
+                      onClick={() => handleApproveRegenScript(openaiRegenScript, "claude")}>
+                      Approve
+                    </button>
+                  </Tooltip>
+                  <Tooltip text="Remove this script from consideration">
+                    <button className="secondary-btn" style={{ flex: 1 }}
+                      onClick={() => handleDiscardRegenScript("openai")}>
+                      Discard
+                    </button>
+                  </Tooltip>
                 </div>
               </div>
             )}
@@ -643,14 +656,18 @@ export default function ConversationAgent({ draft, refresh }) {
                 {/* Approve saves this script to approved_script column in primitives
                     Discard removes it from UI only, still saved in claude_script column */}
                 <div style={{ display: "flex", gap: "8px" }}>
-                  <button className="primary-btn" style={{ flex: 1 }}
-                    onClick={() => handleApproveRegenScript(claudeRegenScript, "openai")}>
-                    Approve
-                  </button>
-                  <button className="secondary-btn" style={{ flex: 1 }}
-                    onClick={() => handleDiscardRegenScript("claude")}>
-                    Discard
-                  </button>
+                  <Tooltip text="Use this script for your final process">
+                    <button className="primary-btn" style={{ flex: 1 }}
+                      onClick={() => handleApproveRegenScript(claudeRegenScript, "openai")}>
+                      Approve
+                    </button>
+                  </Tooltip>
+                  <Tooltip text="Remove this script from consideration">
+                    <button className="secondary-btn" style={{ flex: 1 }}
+                      onClick={() => handleDiscardRegenScript("claude")}>
+                      Discard
+                    </button>
+                  </Tooltip>
                 </div>
               </div>
             )}

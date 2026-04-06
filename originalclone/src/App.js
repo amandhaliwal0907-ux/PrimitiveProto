@@ -10,6 +10,8 @@ import { supabase } from "./supabaseClient";
 import { extractFileText } from "./fileUtils";
 import ConversationAgent from "./ConversationAgent";
 import SyncedPlayer from "./SyncedPlayer";
+import ProcessStepper from "./ProcessStepper";
+import Tooltip from "./Tooltip";
 
 const SUPABASE_FUNCTIONS_URL = "https://javlnpnawmfpypapauyc.supabase.co/functions/v1";
 const POLL_INTERVAL_MS = 10_000;
@@ -41,6 +43,45 @@ function App() {
   const [selectedVoices, setSelectedVoices] = useState({});
 
   const pollTimers = useRef({});
+
+  // Calculate Current Workflow Step
+  const calculateCurrentStep = () => {
+    try {
+      // Default: Step 1 (Upload Checklist)
+      if (!activeDraft) return 1;
+
+      // Step 3: Draft is open but not enhanced
+      if (!activeDraft?.enhanced_primitive) return 3;
+
+      // Step 4: Draft is enhanced but chat not started
+      if (activeDraft?.enhanced_primitive && !activeDraft?.chatStarted) return 4;
+
+      // Step 5: Chat has started
+      if (activeDraft?.chatStarted) return 5;
+
+      // Step 6: Approve Script (final step)
+      return 6;
+    } catch (error) {
+      console.error("Error in calculateCurrentStep:", error);
+      return 1;
+    }
+  };
+
+  const getCompletedSteps = () => {
+    try {
+      const completed = [];
+      const currentStep = calculateCurrentStep();
+      
+      // Mark all steps before current as completed
+      for (let i = 1; i < currentStep; i++) {
+        completed.push(i);
+      }
+      return completed;
+    } catch (error) {
+      console.error("Error in getCompletedSteps:", error);
+      return [];
+    }
+  };
 
   // Auth Session
   useEffect(() => {
@@ -166,7 +207,7 @@ function App() {
           document_text: text,
           primitive_status: "draft",
           script_status: "draft",
-          workflow_state: "primitive_clarification",
+          workflow_state: "review_draft",
         }]).select();
       if (draftError) return alert("Failed to save draft: " + draftError.message);
       if (!newDraftArray?.[0]) return alert("Draft creation failed");
@@ -205,7 +246,7 @@ function App() {
         if (!res.ok) { setActiveDraft((prev) => prev ? { ...prev, enhancing: false } : prev); return; }
         const data = await res.json();
         const enhancedPrimitive = data.primitive || {};
-        await supabase.from("draft_scripts").update({ enhanced_primitive: enhancedPrimitive })
+        await supabase.from("draft_scripts").update({ enhanced_primitive: enhancedPrimitive, workflow_state: "enhanced_primitive" })
           .eq("id", draft.id).eq("user_id", user.id);
         setDrafts((prev) => prev.map((d) => d.id === draft.id ? { ...d, enhanced_primitive: enhancedPrimitive } : d));
         setActiveDraft((prev) => prev ? { ...prev, enhanced_primitive: enhancedPrimitive, enhancing: false } : prev);
@@ -382,23 +423,27 @@ function App() {
           <div className="explainer-generate-row">
             <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
               <span style={{ fontSize: "13px", marginBottom: "2px" }}>Choose a voice:</span>
-              <select
-                className="voice-select"
-                value={presetId}
-                onChange={(e) => setSelectedVoices((prev) => ({ ...prev, [approved.id]: e.target.value }))}
-              >
-                {VOICE_OPTIONS.map((v) => (
-                  <option key={v.value} value={v.value}>{v.label}</option>
-                ))}
-              </select>
+              <Tooltip text="Select who will narrate the video explainer">
+                <select
+                  className="voice-select"
+                  value={presetId}
+                  onChange={(e) => setSelectedVoices((prev) => ({ ...prev, [approved.id]: e.target.value }))}
+                >
+                  {VOICE_OPTIONS.map((v) => (
+                    <option key={v.value} value={v.value}>{v.label}</option>
+                  ))}
+                </select>
+              </Tooltip>
             </div>
-            <button
-              className="primary-btn"
-              disabled={!approved.approved_script}
-              onClick={() => generateExplainer(approved)}
-            >
-               Generate Explainer
-            </button>
+            <Tooltip text="Create a video with voiceover explaining your checklist">
+              <button
+                className="primary-btn"
+                disabled={!approved.approved_script}
+                onClick={() => generateExplainer(approved)}
+              >
+                 Generate Explainer
+              </button>
+            </Tooltip>
           </div>
         )}
       </div>
@@ -474,10 +519,16 @@ function App() {
 
       <div className="dashboard">
         <div className="left-panel">
+          <ProcessStepper currentStep={calculateCurrentStep()} completedSteps={getCompletedSteps()} />
+
           <div className="card upload-section">
             <h3>Upload Checklist</h3>
-            <input type="file" onChange={(e) => setFile(e.target.files[0])} />
-            <button className="primary-btn" onClick={generateScript}>Generate Script</button>
+            <Tooltip text="Select a PDF or document with your checklist items">
+              <input type="file" onChange={(e) => setFile(e.target.files[0])} />
+            </Tooltip>
+            <Tooltip text="AI will analyze your checklist and generate a script">
+              <button className="primary-btn" onClick={generateScript}>Generate Script</button>
+            </Tooltip>
           </div>
 
           <div className="draft-list">
@@ -488,9 +539,11 @@ function App() {
                 <p><strong>Script Status:</strong> {d.script_status}</p>
                 <p><strong>Checklist ID:</strong> {d.primitive_id}</p>
                 <p>{d.script_text}</p>
-                <button className="secondary-btn" onClick={() => toggleDraft(d)}>
-                  {activeDraft?.id === d.id ? "Close Draft" : "Open Draft"}
-                </button>
+                <Tooltip text={activeDraft?.id === d.id ? "Close this draft" : "Review and edit this draft"}>
+                  <button className="secondary-btn" onClick={() => toggleDraft(d)}>
+                    {activeDraft?.id === d.id ? "Close Draft" : "Open Draft"}
+                  </button>
+                </Tooltip>
               </div>
             ))}
           </div>
@@ -515,10 +568,12 @@ function App() {
               </div>
 
               {!activeDraft.chatStarted && (
-                <button className="primary-btn"
-                  onClick={() => setActiveDraft((prev) => ({ ...prev, chatStarted: true }))}>
-                  Start Chat
-                </button>
+                <Tooltip text="Begin conversing with AI to refine your script">
+                  <button className="primary-btn"
+                    onClick={() => setActiveDraft((prev) => ({ ...prev, chatStarted: true }))}>
+                    Start Chat
+                  </button>
+                </Tooltip>
               )}
 
               {activeDraft.chatStarted && (
@@ -527,7 +582,10 @@ function App() {
                   refresh={(removeDraftId, newApprovedScript = null) => {
                     fetchDrafts(removeDraftId);
                     if (newApprovedScript) {
-                      setApprovedScripts((prev) => [newApprovedScript, ...prev]);
+                      setApprovedScripts((prev) => [{
+                        ...newApprovedScript,
+                        workflow_state: "approved"
+                      }, ...prev]);
                     } else {
                       fetchApprovedScripts();
                     }
@@ -538,9 +596,11 @@ function App() {
             </div>
           )}
 
-          <button className="view-btn" onClick={() => setShowApprovedModal(true)}>
-            View Approved Scripts
-          </button>
+          <Tooltip text="See all your completed and approved scripts">
+            <button className="view-btn" onClick={() => setShowApprovedModal(true)}>
+              View Approved Scripts
+            </button>
+          </Tooltip>
 
           {showApprovedModal && (
             <div className="approved-modal">

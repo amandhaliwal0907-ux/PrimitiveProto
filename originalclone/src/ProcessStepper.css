@@ -1,0 +1,156 @@
+/* ProcessStepper Styles */
+
+.process-stepper {
+  background: #FFFFFF;
+  padding: 10px;
+  border-radius: 10px;
+  box-shadow: 0 4px 12px rgba(30, 30, 47, 0.06);
+  margin: 0;
+  flex-shrink: 0;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.stepper-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1E1E2F;
+  margin: 0 0 8px 0;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.stepper-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* Step Styling */
+.stepper-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  position: relative;
+}
+
+.step-circle {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 12px;
+  flex-shrink: 0;
+  transition: all 0.3s ease;
+}
+
+.stepper-step.pending .step-circle {
+  background: #E8E9F3;
+  color: #9CA3AF;
+  border: 2px solid #E0E0E8;
+}
+
+.stepper-step.pending .step-number {
+  font-size: 13px;
+}
+
+.stepper-step.current .step-circle {
+  background: linear-gradient(135deg, #6C63FF, #8E8EE5);
+  color: #FFFFFF;
+  box-shadow: 0 4px 12px rgba(108, 99, 255, 0.3);
+  animation: pulse-ring 2s infinite;
+}
+
+.stepper-step.completed .step-circle {
+  background: linear-gradient(135deg, #4FB6A7, #6AC0B5);
+  color: #FFFFFF;
+}
+
+.step-checkmark {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.step-number {
+  font-size: 14px;
+}
+
+.step-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: #1E1E2F;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.stepper-step.pending .step-label {
+  color: #9CA3AF;
+}
+
+.stepper-step.completed .step-label {
+  color: #4FB6A7;
+}
+
+.stepper-step.current .step-label {
+  color: #6C63FF;
+  font-weight: 600;
+}
+
+/* Connecting Lines */
+.stepper-line {
+  width: 2px;
+  height: 8px;
+  margin: 0 0 0 15px;
+  align-self: flex-start;
+  transition: all 0.3s ease;
+}
+
+.stepper-line.pending {
+  background: #E0E0E8;
+}
+
+.stepper-line.current {
+  background: linear-gradient(to bottom, #6C63FF, #E0E0E8);
+}
+
+.stepper-line.completed {
+  background: linear-gradient(135deg, #4FB6A7, #6AC0B5);
+}
+
+/* Animations */
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 4px 12px rgba(108, 99, 255, 0.3);
+  }
+  50% {
+    box-shadow: 0 4px 20px rgba(108, 99, 255, 0.5);
+  }
+  100% {
+    box-shadow: 0 4px 12px rgba(108, 99, 255, 0.3);
+  }
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .process-stepper {
+    padding: 12px;
+  }
+
+  .stepper-title {
+    font-size: 12px;
+  }
+
+  .step-circle {
+    width: 28px;
+    height: 28px;
+    font-size: 12px;
+  }
+
+  .step-label {
+    font-size: 12px;
+  }
+}

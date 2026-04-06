@@ -1,0 +1,63 @@
+/* Tooltip Styles */
+
+.tooltip-wrapper {
+  position: relative;
+  display: block;
+  width: 100%;
+}
+
+.tooltip-trigger {
+  display: block;
+  width: 100%;
+}
+
+.tooltip-trigger button,
+.tooltip-trigger textarea,
+.tooltip-trigger select {
+  width: 100% !important;
+  display: block !important;
+}
+
+.tooltip-box {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-bottom: 8px;
+  background: #1E1E2F;
+  color: #FFFFFF;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  z-index: 10000;
+  box-shadow: 0 4px 12px rgba(30, 30, 47, 0.3);
+  pointer-events: none !important;
+  animation: tooltipFadeIn 0.2s ease;
+  max-width: 180px;
+  word-wrap: break-word;
+  white-space: normal;
+  user-select: none;
+}
+
+/* Animation */
+@keyframes tooltipFadeIn {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .tooltip-box {
+    font-size: 11px;
+    padding: 8px 10px;
+    max-width: 150px;
+  }
+}
