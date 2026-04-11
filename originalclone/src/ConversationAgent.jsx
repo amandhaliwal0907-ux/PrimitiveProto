@@ -75,6 +75,24 @@ export default function ConversationAgent({ draft, refresh }) {
     }
   }, [primitive, completionMessageShown]);
 
+useEffect(() => {
+  const checkIfApproved = async () => {
+    if(!draft?.primitive_id) return;
+
+    const {data} = await supabase
+    .from("primitives")
+    .select("id")
+    .eq("script_id", draft.primitive_id)
+    .maybeSingle();
+
+    if(data) {
+      setShowRegenerateButton(true);
+      setApproving(true);
+    }
+  };
+  checkIfApproved();
+}, [draft]);
+  
   // Saves the updated primitive to draft_scripts table while user is editing
   const savePrimitiveDraft = async (updated) => {
     setPrimitive(updated);
@@ -137,7 +155,8 @@ export default function ConversationAgent({ draft, refresh }) {
       // Insert primitive into primitives table
       const { error } = await supabase
         .from("primitives")
-        .insert({ script_id: draft.primitive_id, primitive_json: primitive, user_id: draft.user_id });
+        .upsert({ script_id: draft.primitive_id, primitive_json: primitive, user_id: draft.user_id },
+                {onConflict: "script_id"});
 
       if (error) { appendMessage("assistant", `Approval failed: ${error.message}`); return; }
 
@@ -185,7 +204,8 @@ export default function ConversationAgent({ draft, refresh }) {
         .from("primitives")
         .select("primitive_json")
         .eq("script_id", scriptId)
-        .maybeSingle();
+        .limit(1)
+        .single();
 
       if (fetchError || !primData?.primitive_json) {
         appendMessage("assistant", "Primitive data not found, cannot regenerate.");
